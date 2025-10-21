@@ -158,6 +158,7 @@ def main() -> None:
 
     dataloader = None
     dataset_opt = None
+    opt = None
     input_root_path: Optional[Path] = None
     if args.input_root is not None:
         input_root_path = Path(args.input_root).expanduser().resolve()
@@ -196,10 +197,13 @@ def main() -> None:
         )
 
     checkpoint = args.clip_checkpoint
-    if checkpoint is None and opt is not None:
-        checkpoint = opt["path"].get("daclip")
-    
-    # For HF models (hf-hub:...), the checkpoint is embedded in model name
+    if checkpoint is None:
+        if opt is not None:
+            checkpoint = opt["path"].get("daclip")
+        elif dataset_opt is not None and isinstance(dataset_opt, dict):
+            checkpoint = dataset_opt.get("clip_checkpoint") or dataset_opt.get("daclip")
+
+    # For HF models (hf-hub:...), the checkpoint may be embedded in model name
     # For other models, require explicit checkpoint
     if checkpoint is None and not args.clip_model.startswith("hf-hub:"):
         raise ValueError("No CLIP checkpoint provided; use --clip-checkpoint or legacy config.")
