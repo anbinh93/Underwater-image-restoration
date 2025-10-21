@@ -106,7 +106,6 @@ if [[ -f "underwater_ir/teacher/export_pseudolabels_v2.py" ]]; then
     --input-root "${TRAIN_ROOT}/input" \
     --target-root "${TRAIN_ROOT}/target" \
     --output "${PSEUDO_ROOT}/train" \
-    --use-crf \
     --num-workers "${WORKERS}"
 else
   # Fallback to original version
@@ -147,13 +146,12 @@ for subset_dir in "${VAL_REF_ROOT}"/*; do
   mkdir -p "${PSEUDO_ROOT}/testset_ref/${subset}"
   
   if [[ -f "underwater_ir/teacher/export_pseudolabels_v2.py" ]]; then
-    python3 -m underwater_ir.teacher.export_pseudolabels_v2 \
-      --config "${CONFIG_FILE}" \
-      --input-root "${subset_dir}/input" \
-      --target-root "${subset_dir}/target" \
-      --output "${PSEUDO_ROOT}/testset_ref/${subset}" \
-      --use-crf \
-      --num-workers "${WORKERS}"
+  python3 -m underwater_ir.teacher.export_pseudolabels_v2 \
+    --config "${CONFIG_FILE}" \
+    --input-root "${subset_dir}/input" \
+    --target-root "${subset_dir}/target" \
+    --output "${PSEUDO_ROOT}/testset_ref/${subset}" \
+    --num-workers "${WORKERS}"
   else
     if [[ "${CLIP_MODEL}" == "daclip_custom" ]]; then
       python3 -m underwater_ir.teacher.export_pseudolabels \
@@ -180,12 +178,11 @@ for subset_dir in "${VAL_NONREF_ROOT}"/*; do
   mkdir -p "${PSEUDO_ROOT}/testset_nonref/${subset}"
   
   if [[ -f "underwater_ir/teacher/export_pseudolabels_v2.py" ]]; then
-    python3 -m underwater_ir.teacher.export_pseudolabels_v2 \
-      --config "${CONFIG_FILE}" \
-      --input-root "${input_dir}" \
-      --output "${PSEUDO_ROOT}/testset_nonref/${subset}" \
-      --use-crf \
-      --num-workers "${WORKERS}"
+  python3 -m underwater_ir.teacher.export_pseudolabels_v2 \
+    --config "${CONFIG_FILE}" \
+    --input-root "${input_dir}" \
+    --output "${PSEUDO_ROOT}/testset_nonref/${subset}" \
+    --num-workers "${WORKERS}"
   else
     if [[ "${CLIP_MODEL}" == "daclip_custom" ]]; then
       python3 -m underwater_ir.teacher.export_pseudolabels \
