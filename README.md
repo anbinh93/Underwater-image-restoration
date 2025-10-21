@@ -9,6 +9,8 @@
 
 Our follow-up work [Photo-Realistic Image Restoration in the Wild with Controlled Vision-Language Models](https://arxiv.org/abs/2404.09732) (CVPRW 2024) presents a [posterior sampling](https://github.com/Algolzw/daclip-uir/blob/74b7851827b485287971300e4b2a56ea0f8f1d75/universal-image-restoration/utils/sde_utils.py#L297) for better image generation and handles real-world mixed-degradation images similar to [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN).
 
+> **Note on repo structure.** The streamlined underwater image restoration pipeline lives under `underwater_ir/`, `scripts/`, `prompts/`, and `Dataset/`. Historical dependencies (DA-CLIP training code, Cog predictor, compatibility shims) have been archived to `legacy/third_party/` and `legacy/compat/` so they no longer interfere with the core workflow.
+
 
 
 ### Updates
@@ -44,7 +46,7 @@ pip install -r requirements.txt
 
 ### DA-CLIP Usage
 
-Get into the `universal-image-restoration` directory and run:
+Legacy utilities remain under `legacy/third_party/universal-image-restoration` if you need the original DA-CLIP training scripts. Get into that directory and run:
 
 ```python
 import torch
@@ -76,40 +78,43 @@ print(f"Task: {task_name}: {degradations[index]} - {text_probs[0][index]}")
 The repo now provides a complete DACLiP-driven teacher → student → RL inference workflow tailored for underwater degradations.
 
 - **Stage A — Teacher pseudo-labels**  
-  Run `teacher/export_pseudolabels.py` to export masks, per-class intensities, degradation logits, and confidence scores.  
+  Run `underwater_ir/teacher/export_pseudolabels.py` to export masks, per-class intensities, degradation logits, and confidence scores.  
   ```bash
-  python teacher/export_pseudolabels.py \
-      --config universal-image-restoration/config/daclip-sde/options/test.yml \
+  python underwater_ir/teacher/export_pseudolabels.py \
+      --config legacy/third_party/universal-image-restoration/config/daclip-sde/options/test.yml \
       --dataset test \
       --output pseudo-labels/ \
       --use-crf
   ```
 
 - **Stage B — Student training with WFI-Gate**  
-  Train the NAFNet-UNet + Wavelet–Fourier Information Gate using the generated pseudo-labels.  
+  Train the NAFNet-UNet + Wavelet–Fourier Information Gate using the generated pseudo-labels. The trainer now loads paired samples from `Dataset/train`, benchmarks the reference splits with PSNR/SSIM, and reports UIQM/UCIQE on non-reference sets.  
 ```bash
-python student/train_student.py \
-    --config universal-image-restoration/config/daclip-sde/options/train.yml \
-    --pseudo-root pseudo-labels/ \
+python underwater_ir/student/train_student.py \
+    --train-root Dataset/train \
+    --val-ref-root "Dataset/testset(ref)" \
+    --val-nonref-root "Dataset/testset(non-ref)" \
+    --pseudo-root pseudo-labels \
     --epochs 50 \
     --save-path experiments/nafnet_wfi.pt
   ```
+  (The script looks for pseudo-labels under `pseudo-labels/train`, `pseudo-labels/testset_ref/<subset>`, and `pseudo-labels/testset_nonref/<subset>` unless you override the paths.)
 
 - **Stage C — RL inference adapter**  
   During inference, fine-tune the restored image with the UIEP-CWGR inspired RL controller.  
   ```bash
-python rl_adapter/infer_adapt.py \
+python underwater_ir/rl/infer_adapt.py \
     --model experiments/nafnet_wfi.pt \
     --image demo/underwater.png \
     --pseudo pseudo-labels/demo/underwater.pt \
     --output demo/underwater_enhanced.png
-```
+  ```
 
 To benchmark different VLM backbones (e.g., CLIP2 vs. DACLiP vs. SigLIP2), use the helper sweep script:
 
 ```bash
 scripts/encoder_sweep.sh \
-    --config universal-image-restoration/config/daclip-sde/options/train.yml \
+    --config legacy/third_party/universal-image-restoration/config/daclip-sde/options/train.yml \
     --dataset train \
     --pseudo-root pseudo-labels \
     --output-root experiments/encoder_sweep \
@@ -117,10 +122,10 @@ scripts/encoder_sweep.sh \
 ```
 
 Key modules are organised under:
-- `teacher/`: mask extraction, degradation coding, and pseudo-label export.
-- `student/naf_unet_wfi/`: NAFNet-WFI student model and degradation head.
-- `student/losses/`: frequency, distillation, and perceptual losses.
-- `rl_adapter/`: UIEP-CWGR operators, UIQM/UCIQE metrics, Q-learning agent, and inference script.
+- `underwater_ir/teacher/`: mask extraction, degradation coding, and pseudo-label export.
+- `underwater_ir/student/naf_unet_wfi/`: NAFNet-WFI student model and degradation head.
+- `underwater_ir/student/losses/`: frequency, distillation, and perceptual losses.
+- `underwater_ir/rl/`: UIEP-CWGR operators, UIQM/UCIQE metrics, Q-learning agent, and inference script.
 
 ### Dataset Preparation
 
@@ -153,7 +158,7 @@ datasets/universal/daclip_train.csv
 datasets/universal/daclip_val.csv
 ```
 
-Then get into the `universal-image-restoration/config/daclip-sde` directory and modify the dataset paths in option files in `options/train.yml` and `options/test.yml`. 
+Then get into the `legacy/third_party/universal-image-restoration/config/daclip-sde` directory and modify the dataset paths in option files in `options/train.yml` and `options/test.yml`. 
 
 You can add more tasks or datasets to both `train` and `val` directories and add the degradation word to `distortion`.
 
@@ -172,17 +177,17 @@ You should **only extract the train datasets for training**, and all **validatio
 ### Training
 
 #### DA-CLIP 
-See [DA-CLIP.md](da-clip/README.md) for details.
+See [DA-CLIP.md](legacy/third_party/vendor/da_clip/README.md) for details.
 
 #### Universal Image Restoration
-The main code for training is in `universal-image-restoration/config/daclip-sde` and the core network for DA-CLIP is in `universal-image-restoration/open_clip/daclip_model.py`.
+The legacy DA-CLIP training code now lives in `legacy/third_party/universal-image-restoration/config/daclip-sde`, and the core network for DA-CLIP is in `legacy/third_party/universal-image-restoration/open_clip/daclip_model.py`.
 
 * Put the pretrained [**DA-CLIP weights**](https://drive.google.com/file/d/1A6u4CaVrcpcZckGUNzEXqMF8x_JXsZdX/view?usp=sharing) to `pretrained` directory and check the `daclip` path.
 
 * You can then train the model following below bash scripts:
 
 ```bash
-cd universal-image-restoration/config/daclip-sde
+cd legacy/third_party/universal-image-restoration/config/daclip-sde
 
 # For single GPU:
 python3 train.py -opt=options/train.yml
@@ -194,7 +199,7 @@ python3 -m torch.distributed.launch --nproc_per_node=2 --master_port=4321 train.
 The models and training logs will save in `log/universal-ir`. 
 You can print your log at time by running `tail -f log/universal-ir/train_universal-ir_***.log -n 100`.
 
-**The same training steps can be used for image restoration in the wild ([wild-ir](https://github.com/Algolzw/daclip-uir/tree/main/universal-image-restoration/config/wild-ir)).**
+**The same training steps can be used for image restoration in the wild (under `legacy/third_party/universal-image-restoration/config/wild-ir`).**
 
 #### Pretrained Models
 | Model Name   | Description                                     | GoogleDrive                                                                                   | HuggingFace                                                                                      |
@@ -210,14 +215,14 @@ You can print your log at time by running `tail -f log/universal-ir/train_univer
 To evalute our method on image restoration, please modify the benchmark path and model path and run
 
 ```bash
-cd universal-image-restoration/config/universal-ir
+cd legacy/third_party/universal-image-restoration/config/universal-ir
 python test.py -opt=options/test.yml
 ```
 
 ### Gradio
-Here we provide an [app.py](https://github.com/Algolzw/daclip-uir/tree/main/universal-image-restoration/config/daclip-sde/app.py) file for testing your own images. Before that, you need to download the pretrained weights ([DA-CLIP](https://drive.google.com/file/d/1A6u4CaVrcpcZckGUNzEXqMF8x_JXsZdX/view?usp=sharing) and [UIR](https://drive.google.com/file/d/1eXsyrmAbWOvhIY4Wbt5v4IxaggA5aZMG/view?usp=sharing)) and modify the model path in `options/test.yml`. Then by simply running `python app.py`, you can open `http://localhost:7860` to test the model. (We also provide several images with different degradations in the `images` dir). We also provide more examples from our test dataset in the [google drive](https://drive.google.com/file/d/1C1nmP5kJXzxrULxTMVWF5P30qezqP6kn/view?usp=sharing).
+Here we provide an [app.py](https://github.com/Algolzw/daclip-uir/tree/main/universal-image-restoration/config/daclip-sde/app.py) file for testing your own images. In this repo it resides under `legacy/third_party/universal-image-restoration/config/daclip-sde/app.py`. Before that, you need to download the pretrained weights ([DA-CLIP](https://drive.google.com/file/d/1A6u4CaVrcpcZckGUNzEXqMF8x_JXsZdX/view?usp=sharing) and [UIR](https://drive.google.com/file/d/1eXsyrmAbWOvhIY4Wbt5v4IxaggA5aZMG/view?usp=sharing)) and modify the model path in `options/test.yml`. Then by simply running `python app.py`, you can open `http://localhost:7860` to test the model. (We also provide several images with different degradations in the `images` dir). We also provide more examples from our test dataset in the [google drive](https://drive.google.com/file/d/1C1nmP5kJXzxrULxTMVWF5P30qezqP6kn/view?usp=sharing).
 
-**The same steps can be used for image restoration in the wild ([wild-ir](https://github.com/Algolzw/daclip-uir/tree/main/universal-image-restoration/config/wild-ir)).**
+**The same steps can be used for image restoration in the wild (located under `legacy/third_party/universal-image-restoration/config/wild-ir`).**
 
 
 ### Results

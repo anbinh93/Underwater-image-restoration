@@ -2,7 +2,7 @@
 # Compare different VLM encoders (CLIP2, BERT, SigLIP2, etc.) using the DACLiP teacher + student pipeline.
 # Usage:
 #   scripts/encoder_sweep.sh \
-#       --config universal-image-restoration/config/daclip-sde/options/train.yml \
+#       --config legacy/third_party/universal-image-restoration/config/daclip-sde/options/train.yml \
 #       --dataset train \
 #       --pseudo-root pseudo-labels \
 #       --output-root experiments/encoder_sweep \
@@ -16,6 +16,9 @@ DATASET="train"
 TEST_DATASET=""
 PSEUDO_ROOT="pseudo-labels"
 OUTPUT_ROOT="experiments/encoder_sweep"
+TRAIN_ROOT="Dataset/train"
+VAL_REF_ROOT="Dataset/testset(ref)"
+VAL_NONREF_ROOT="Dataset/testset(non-ref)"
 EPOCHS=10
 BATCH_SIZE=""
 NUM_WORKERS=""
@@ -36,14 +39,17 @@ Options:
   --test-dataset <name>  Optional dataset key dedicated to pseudo-label export (default: dataset)
   --pseudo-root <dir>    Directory to store pseudo-labels (default: pseudo-labels)
   --output-root <dir>    Directory to store trained checkpoints (default: experiments/encoder_sweep)
+  --train-root <path>    Paired training dataset root (default: Dataset/train)
+  --val-ref-root <path>  Reference benchmark root (default: Dataset/testset(ref))
+  --val-nonref-root <path> Non-reference benchmark root (default: Dataset/testset(non-ref))
   --epochs <int>         Training epochs for student (default: 10)
   --batch-size <int>     Override batch size passed to student/train_student.py
   --num-workers <int>    Override dataloader workers for pseudo export and student training
   --encoder <name>       Limit sweep to a specific encoder entry (can be provided multiple times)
   --skip-export          Do not re-run teacher export (expects existing pseudo-labels)
   --skip-train           Do not run student training (e.g., export only)
-  --extra-export <args>  Additional args forwarded to teacher/export_pseudolabels.py (repeatable)
-  --extra-train <args>   Additional args forwarded to student/train_student.py (repeatable)
+  --extra-export <args>  Additional args forwarded to underwater_ir/teacher/export_pseudolabels.py (repeatable)
+  --extra-train <args>   Additional args forwarded to underwater_ir/student/train_student.py (repeatable)
   -h, --help             Show this message
 EOF
 }
@@ -55,6 +61,9 @@ while [[ $# -gt 0 ]]; do
     --test-dataset) TEST_DATASET="$2"; shift 2;;
     --pseudo-root) PSEUDO_ROOT="$2"; shift 2;;
     --output-root) OUTPUT_ROOT="$2"; shift 2;;
+    --train-root) TRAIN_ROOT="$2"; shift 2;;
+    --val-ref-root) VAL_REF_ROOT="$2"; shift 2;;
+    --val-nonref-root) VAL_NONREF_ROOT="$2"; shift 2;;
     --epochs) EPOCHS="$2"; shift 2;;
     --batch-size) BATCH_SIZE="$2"; shift 2;;
     --num-workers) NUM_WORKERS="$2"; shift 2;;
@@ -122,12 +131,12 @@ for entry in "${ENCODER_MATRIX[@]}"; do
   echo "=== Encoder: ${name} (${clip_model}) => tag=${tag} ==="
 
   if [[ ${SKIP_EXPORT} -eq 0 ]]; then
-    mkdir -p "${pseudo_dir}"
+    mkdir -p "${pseudo_dir}/train"
     export_args=(
-      python teacher/export_pseudolabels.py
+      python underwater_ir/teacher/export_pseudolabels.py
       --config "${CONFIG}"
       --dataset "${TEST_DATASET}"
-      --output "${pseudo_dir}"
+      --output "${pseudo_dir}/train"
       --clip-model "${clip_model}"
     )
     if [[ -n "${NUM_WORKERS}" ]]; then
@@ -145,9 +154,10 @@ for entry in "${ENCODER_MATRIX[@]}"; do
 
   if [[ ${SKIP_TRAIN} -eq 0 ]]; then
     train_args=(
-      python student/train_student.py
-      --config "${CONFIG}"
-      --dataset "${DATASET}"
+      python underwater_ir/student/train_student.py
+      --train-root "${TRAIN_ROOT}"
+      --val-ref-root "${VAL_REF_ROOT}"
+      --val-nonref-root "${VAL_NONREF_ROOT}"
       --pseudo-root "${pseudo_dir}"
       --epochs "${EPOCHS}"
       --save-path "${model_path}"
