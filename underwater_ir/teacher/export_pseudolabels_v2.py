@@ -29,7 +29,6 @@ from underwater_ir.model_loader import load_clip_model
 from underwater_ir.data.datasets import (
     PairedImageDataset,
     UnpairedImageDataset,
-    create_dataloader as create_simple_dataloader,
 )
 
 # Import teacher modules
@@ -182,6 +181,7 @@ def export_pseudolabels(
     prompts: List[str],
     output_dir: Path,
     device: torch.device,
+    input_root: Path,
     model_type: str = "hf_clip",
     temperature: float = 10.0,
     threshold: float = 0.5,
@@ -198,79 +198,113 @@ def export_pseudolabels(
     print(f"Processing {len(dataloader)} batches...")
     
     for batch_idx, batch in enumerate(dataloader):
-        # Handle None or empty batch
         if batch is None:
             print(f"Warning: Batch {batch_idx} is None, skipping...")
             continue
-        
-        # Handle dictionary format
+
+        # Normalize batch into a list of samples
         if isinstance(batch, dict):
-            images = batch.get("lq") or batch.get("input") or batch.get("image")
-            gt_images = batch.get("gt") or batch.get("target")
-            names = batch.get("name") or batch.get("filename")
-            
-            if images is None:
-                print(f"Warning: No images in batch {batch_idx}, skipping...")
-                print(f"Available keys: {list(batch.keys())}")
-                continue
-        
-        # Handle tuple/list format
-        elif isinstance(batch, (tuple, list)):
-            if len(batch) == 0:
-                print(f"Warning: Empty batch {batch_idx}, skipping...")
-                continue
-            images = batch[0]
-            gt_images = batch[1] if len(batch) > 1 else None
-            names = batch[2] if len(batch) > 2 else None
-        
+            samples = [batch]
+        elif isinstance(batch, list):
+            samples = batch
         else:
             print(f"Warning: Unknown batch type {type(batch)}, skipping...")
             continue
-        
-        # Generate default names if None
-        if names is None:
-            names = [f"image_{batch_idx}_{i}" for i in range(len(images))]
-        
-        images = images.to(device)
-        
+
+        image_tensors: List[torch.Tensor] = []
+        name_list: List[str] = []
+
+        for sample in samples:
+            if not isinstance(sample, dict):
+                print(f"Warning: Unexpected sample type {type(sample)}, skipping...")
+                continue
+
+            canonical = {k.lower(): v for k, v in sample.items()}
+
+            image = canonical.get("lq") or canonical.get("input") or canonical.get("image")
+            if image is None:
+                print(f"Warning: Sample missing image tensor, keys={list(sample.keys())}")
+                continue
+
+            if not torch.is_tensor(image):
+                if isinstance(image, np.ndarray):
+                    tensor = torch.from_numpy(image)
+                    if tensor.ndim == 3 and tensor.shape[-1] == 3:
+                        tensor = tensor.permute(2, 0, 1)
+                    tensor = tensor.float() / 255.0
+                elif isinstance(image, Image.Image):
+                    tensor = ToTensor()(image)
+                else:
+                    print(f"Warning: Unsupported image type {type(image)}, skipping sample")
+                    continue
+            else:
+                tensor = image.float()
+
+            if tensor.ndim == 4:
+                tensor = tensor.squeeze(0)
+
+            image_tensors.append(tensor.cpu())
+
+            name = (
+                canonical.get("rel_path")
+                or canonical.get("lq_path")
+                or canonical.get("input_path")
+                or canonical.get("name")
+                or canonical.get("filename")
+            )
+
+            if isinstance(name, (list, tuple)) and name:
+                name = name[0]
+            if name is None:
+                name = f"image_{batch_idx}_{len(name_list)}"
+            name_list.append(str(name))
+
+        if not image_tensors:
+            print(f"Warning: No usable images in batch {batch_idx}, skipping...")
+            continue
+
         # Extract features based on model type
         if model_type in ["hf_clip", "openai_clip"]:
             image_features, text_features, logits = extract_features_hf_clip(
-                model, processor, tokenizer, images, prompts, device
+                model, processor, tokenizer, image_tensors, prompts, device
             )
         else:
             # TODO: Implement for custom DACLiP if needed
             raise NotImplementedError(f"Model type {model_type} not yet supported")
-        
+
         # Compute masks
         masks, probs = compute_degradation_masks(
             logits,
             temperature=temperature,
             threshold=threshold,
             use_crf=use_crf,
-            images=images,
+            images=None,
             crf_params=crf_params
         )
-        
+
         # Save outputs
-        for i, name in enumerate(names):
-            if isinstance(name, (list, tuple)):
-                name = name[0]
-            
-            # Remove extension if present
-            name = Path(name).stem
-            
-            # Save masks
-            mask_np = masks[i].cpu().numpy()  # (N_prompts, H, W)
-            np.save(output_dir / f"{name}_masks.npy", mask_np)
-            
-            # Save probabilities
-            prob_np = probs[i].cpu().numpy()  # (N_prompts,)
-            np.save(output_dir / f"{name}_probs.npy", prob_np)
-            
-            # Save image features (z_d - degradation encoding)
+        for i, name in enumerate(name_list):
+            name_path = Path(name)
+            if name_path.is_absolute():
+                try:
+                    rel_path = name_path.relative_to(input_root)
+                except ValueError:
+                    rel_path = Path(name_path.name)
+            else:
+                rel_path = name_path
+
+            save_dir = output_dir / rel_path.parent
+            save_dir.mkdir(parents=True, exist_ok=True)
+            stem = rel_path.stem
+
+            mask_np = masks[i].cpu().numpy()
+            np.save(save_dir / f"{stem}_masks.npy", mask_np)
+
+            prob_np = probs[i].cpu().numpy()
+            np.save(save_dir / f"{stem}_probs.npy", prob_np)
+
             feat_np = image_features[i].cpu().numpy()
-            np.save(output_dir / f"{name}_features.npy", feat_np)
+            np.save(save_dir / f"{stem}_features.npy", feat_np)
         
         if (batch_idx + 1) % 10 == 0:
             print(f"  Processed {batch_idx + 1}/{len(dataloader)} batches")
@@ -380,11 +414,18 @@ def main():
         dataset = UnpairedImageDataset(input_root)
         print(f"  Using unpaired dataset")
     
-    dataloader = create_simple_dataloader(
+    from torch.utils.data import DataLoader
+
+    def collate_keep(samples):
+        return samples
+
+    dataloader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers
+        num_workers=args.num_workers,
+        collate_fn=collate_keep,
+        pin_memory=True,
     )
     print(f"  Dataset size: {len(dataset)}")
     
@@ -410,6 +451,7 @@ def main():
         prompts=prompts,
         output_dir=output_dir,
         device=device,
+        input_root=input_root,
         model_type=model_type,
         temperature=args.temperature,
         threshold=args.threshold,
