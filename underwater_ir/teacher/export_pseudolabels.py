@@ -14,19 +14,19 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Resize, CenterCrop, Normalize, ToTensor, InterpolationMode
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+ROOT = PACKAGE_ROOT.parent
 LEGACY_ROOT = ROOT / "legacy" / "third_party" / "universal-image-restoration"
 
-try:
-    from ..data.datasets import (
+if __package__:
+    from ..data.datasets import (  # type: ignore
         PairedImageDataset,
         UnpairedImageDataset,
         create_dataloader as create_simple_dataloader,
     )
-except ImportError:  # pragma: no cover - fallback for script execution
-    sys.path.insert(0, str(ROOT))
+else:  # pragma: no cover - executed when run as script
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     from underwater_ir.data.datasets import (  # type: ignore
         PairedImageDataset,
         UnpairedImageDataset,
