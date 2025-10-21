@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+import types
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -18,10 +19,39 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 ROOT = PACKAGE_ROOT.parent
 LEGACY_ROOT = ROOT / "legacy" / "third_party" / "universal-image-restoration"
 
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from underwater_ir.data.datasets import (  # type: ignore
+def _ordered_yaml():
+    from collections import OrderedDict
+    import yaml
+
+    try:
+        from yaml import CDumper as Dumper
+        from yaml import CLoader as Loader
+    except ImportError:  # pragma: no cover
+        from yaml import Dumper, Loader
+
+    _mapping_tag = yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG
+
+    def dict_representer(dumper, data):
+        return dumper.represent_dict(data.items())
+
+    def dict_constructor(loader, node):
+        return OrderedDict(loader.construct_pairs(node))
+
+    Dumper.add_representer(OrderedDict, dict_representer)
+    Loader.add_constructor(_mapping_tag, dict_constructor)
+    return Loader, Dumper
+
+
+utils_stub = types.ModuleType("utils")
+utils_stub.OrderedYaml = _ordered_yaml
+sys.modules.setdefault("utils", utils_stub)
+
+if __package__ in (None, "", "__main__"):
+    sys.path.insert(0, str(ROOT))
+    __package__ = "underwater_ir.teacher"
+
+from ..data.datasets import (  # type: ignore
     PairedImageDataset,
     UnpairedImageDataset,
     create_dataloader as create_simple_dataloader,
@@ -36,17 +66,7 @@ except ModuleNotFoundError:
     option = None  # type: ignore
 else:
     if not hasattr(option, "OrderedYaml"):
-        import importlib.util
-
-        utils_path = LEGACY_ROOT / "utils.py"
-        ordered = None
-        if utils_path.exists():
-            utils_spec = importlib.util.spec_from_file_location("legacy_utils", utils_path)
-            if utils_spec and utils_spec.loader:
-                utils_module = importlib.util.module_from_spec(utils_spec)
-                utils_spec.loader.exec_module(utils_module)
-                ordered = getattr(utils_module, "OrderedYaml", None)
-        option.OrderedYaml = ordered
+        option.OrderedYaml = _ordered_yaml
 
 create_dataset = None
 if option is not None:
