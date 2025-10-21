@@ -198,12 +198,19 @@ def main() -> None:
     checkpoint = args.clip_checkpoint
     if checkpoint is None and opt is not None:
         checkpoint = opt["path"].get("daclip")
-    if checkpoint is None:
+    
+    # For HF models (hf-hub:...), the checkpoint is embedded in model name
+    # For other models, require explicit checkpoint
+    if checkpoint is None and not args.clip_model.startswith("hf-hub:"):
         raise ValueError("No CLIP checkpoint provided; use --clip-checkpoint or legacy config.")
 
-    clip_model, preprocess = open_clip.create_model_from_pretrained(
-        args.clip_model, pretrained=checkpoint
-    )
+    # Load model - for HF models, pretrained can be None/empty
+    if args.clip_model.startswith("hf-hub:"):
+        clip_model, preprocess = open_clip.create_model_from_pretrained(args.clip_model)
+    else:
+        clip_model, preprocess = open_clip.create_model_from_pretrained(
+            args.clip_model, pretrained=checkpoint
+        )
     clip_model = clip_model.to(args.device).eval()
     transform = preprocess or build_clip_transform()
 

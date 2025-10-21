@@ -5,8 +5,14 @@ set -euo pipefail
 # 1) Export pseudo-labels with the CLIP HF weight.
 # 2) Train the student against Dataset/train with benchmark evaluation.
 
-HF_MODEL="hf-hub:openai/clip-vit-base-patch32"
-CLIP_CKPT="hf-hub:openai/clip-vit-base-patch32"
+# Use OpenAI's CLIP model from Hugging Face
+# Format for Hugging Face models in open_clip: "hf-hub:organization/model-name"
+# Options:
+#   - "hf-hub:openai/clip-vit-base-patch32" (OpenAI ViT-B/32 from HF)
+#   - "hf-hub:openai/clip-vit-large-patch14" (OpenAI ViT-L/14 from HF)
+#   - "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K" (LAION trained)
+CLIP_MODEL="hf-hub:openai/clip-vit-base-patch32"
+CLIP_CKPT=""  # Leave empty for HF models (checkpoint is in model ID)
 TRAIN_ROOT="Dataset/train"
 VAL_REF_ROOT="Dataset/testset(ref)"
 VAL_NONREF_ROOT="Dataset/testset(non-ref)"
@@ -25,8 +31,7 @@ python -m underwater_ir.teacher.export_pseudolabels \
   --input-root "${TRAIN_ROOT}/input" \
   --target-root "${TRAIN_ROOT}/target" \
   --output "${PSEUDO_ROOT}/train" \
-  --clip-model "${HF_MODEL}" \
-  --clip-checkpoint "${CLIP_CKPT}" \
+  --clip-model "${CLIP_MODEL}" \
   --use-crf \
   --num-workers "${WORKERS}"
 
@@ -39,8 +44,7 @@ for subset_dir in "${VAL_REF_ROOT}"/*; do
     --input-root "${subset_dir}/input" \
     --target-root "${subset_dir}/target" \
     --output "${PSEUDO_ROOT}/testset_ref/${subset}" \
-    --clip-model "${HF_MODEL}" \
-    --clip-checkpoint "${CLIP_CKPT}" \
+    --clip-model "${CLIP_MODEL}" \
     --use-crf \
     --num-workers "${WORKERS}"
 done
@@ -57,8 +61,7 @@ for subset_dir in "${VAL_NONREF_ROOT}"/*; do
   python -m underwater_ir.teacher.export_pseudolabels \
     --input-root "${input_dir}" \
     --output "${PSEUDO_ROOT}/testset_nonref/${subset}" \
-    --clip-model "${HF_MODEL}" \
-    --clip-checkpoint "${CLIP_CKPT}" \
+    --clip-model "${CLIP_MODEL}" \
     --use-crf \
     --num-workers "${WORKERS}"
 done
