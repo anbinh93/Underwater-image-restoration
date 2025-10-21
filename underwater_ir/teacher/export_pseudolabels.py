@@ -15,6 +15,8 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Resize, CenterCrop, Normalize, ToTensor, InterpolationMode
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 LEGACY_ROOT = ROOT / "legacy" / "third_party" / "universal-image-restoration"
 
 try:
