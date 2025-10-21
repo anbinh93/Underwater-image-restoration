@@ -28,13 +28,37 @@ except ImportError as exc:
     raise SystemExit("Missing dependencies (ftfy, sentencepiece). Install them before running.") from exc
 PY
 
-echo "================================================================================  "
-echo "[Stage 1a] Exporting pseudo-labels for training set..."
+echo ""
+echo "================================================================================"
+echo "[Stage 1a] Exporting pseudo-labels for TRAINING set..."
+echo "================================================================================"
 echo "  Input: ${TRAIN_ROOT}/input"
 echo "  Target: ${TRAIN_ROOT}/target"
 echo "  Output: ${PSEUDO_ROOT}/train"
-echo "================================================================================"
+echo "  CLIP Model: ${CLIP_MODEL}"
+echo "  Checkpoint: ${CLIP_CKPT}"
+echo ""
+
+# Verify input directories exist
+if [[ ! -d "${TRAIN_ROOT}/input" ]]; then
+  echo "❌ ERROR: Training input directory not found: ${TRAIN_ROOT}/input" >&2
+  exit 1
+fi
+
+if [[ ! -d "${TRAIN_ROOT}/target" ]]; then
+  echo "❌ ERROR: Training target directory not found: ${TRAIN_ROOT}/target" >&2
+  exit 1
+fi
+
+echo "✅ Training directories verified"
+input_count=$(find "${TRAIN_ROOT}/input" -type f \( -name "*.jpg" -o -name "*.png" \) | wc -l)
+target_count=$(find "${TRAIN_ROOT}/target" -type f \( -name "*.jpg" -o -name "*.png" \) | wc -l)
+echo "   Input images: ${input_count}"
+echo "   Target images: ${target_count}"
+echo ""
+
 mkdir -p "${PSEUDO_ROOT}/train"
+echo "Running export_pseudolabels..."
 python -m underwater_ir.teacher.export_pseudolabels \
   --input-root "${TRAIN_ROOT}/input" \
   --target-root "${TRAIN_ROOT}/target" \
@@ -43,14 +67,37 @@ python -m underwater_ir.teacher.export_pseudolabels \
   --clip-checkpoint "${CLIP_CKPT}" \
   --num-workers "${WORKERS}"
 
+export_status=$?
+if [[ $export_status -ne 0 ]]; then
+  echo "❌ ERROR: Pseudo-label export failed with exit code ${export_status}" >&2
+  exit 1
+fi
+
 echo ""
-echo "Checking exported files in ${PSEUDO_ROOT}/train:"
-find "${PSEUDO_ROOT}/train" -name "*.pt" -type f | head -5
-echo "Total .pt files: $(find "${PSEUDO_ROOT}/train" -name "*.pt" -type f | wc -l)"
+echo "Verifying exported pseudo-labels..."
+if [[ ! -d "${PSEUDO_ROOT}/train" ]]; then
+  echo "❌ ERROR: Output directory was not created: ${PSEUDO_ROOT}/train" >&2
+  exit 1
+fi
+
+pt_files=$(find "${PSEUDO_ROOT}/train" -name "*.pt" -type f)
+pt_count=$(echo "$pt_files" | grep -c "\.pt$" || echo 0)
+
+if [[ $pt_count -eq 0 ]]; then
+  echo "❌ ERROR: No .pt files found in ${PSEUDO_ROOT}/train" >&2
+  echo "   Export may have failed silently. Check logs above." >&2
+  exit 1
+fi
+
+echo "✅ Export successful!"
+echo "   Output directory: ${PSEUDO_ROOT}/train"
+echo "   Pseudo-label files: ${pt_count}"
+echo "   Sample files:"
+echo "$pt_files" | head -3
 echo ""
 
-echo "================================================================================  "
-echo "[Stage 1b] Exporting pseudo-labels for reference validation sets..."
+echo "================================================================================"
+echo "[Stage 1b] Exporting pseudo-labels for REFERENCE validation sets..."
 echo "================================================================================"
 for subset_dir in "${VAL_REF_ROOT}"/*; do
   [[ -d "${subset_dir}" ]] || continue
@@ -64,11 +111,10 @@ for subset_dir in "${VAL_REF_ROOT}"/*; do
     --clip-model "${CLIP_MODEL}" \
     --clip-checkpoint "${CLIP_CKPT}" \
     --num-workers "${WORKERS}"
-done
 echo ""
 
-echo "================================================================================  "
-echo "[Stage 1c] Exporting pseudo-labels for non-reference validation sets..."
+echo "================================================================================"
+echo "[Stage 1c] Exporting pseudo-labels for NON-REFERENCE validation sets..."
 echo "================================================================================"
 for subset_dir in "${VAL_NONREF_ROOT}"/*; do
   [[ -d "${subset_dir}" ]] || continue
