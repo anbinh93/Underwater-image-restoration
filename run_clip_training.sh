@@ -6,6 +6,7 @@ set -euo pipefail
 # 2) Train the student against Dataset/train with benchmark evaluation.
 
 HF_MODEL="hf-hub:openai/clip-vit-base-patch32"
+CLIP_CKPT="hf-hub:openai/clip-vit-base-patch32"
 TRAIN_ROOT="Dataset/train"
 VAL_REF_ROOT="Dataset/testset(ref)"
 VAL_NONREF_ROOT="Dataset/testset(non-ref)"
@@ -25,6 +26,7 @@ python -m underwater_ir.teacher.export_pseudolabels \
   --target-root "${TRAIN_ROOT}/target" \
   --output "${PSEUDO_ROOT}/train" \
   --clip-model "${HF_MODEL}" \
+  --clip-checkpoint "${CLIP_CKPT}" \
   --use-crf \
   --num-workers "${WORKERS}"
 
@@ -38,6 +40,7 @@ for subset_dir in "${VAL_REF_ROOT}"/*; do
     --target-root "${subset_dir}/target" \
     --output "${PSEUDO_ROOT}/testset_ref/${subset}" \
     --clip-model "${HF_MODEL}" \
+    --clip-checkpoint "${CLIP_CKPT}" \
     --use-crf \
     --num-workers "${WORKERS}"
 done
@@ -55,6 +58,7 @@ for subset_dir in "${VAL_NONREF_ROOT}"/*; do
     --input-root "${input_dir}" \
     --output "${PSEUDO_ROOT}/testset_nonref/${subset}" \
     --clip-model "${HF_MODEL}" \
+    --clip-checkpoint "${CLIP_CKPT}" \
     --use-crf \
     --num-workers "${WORKERS}"
 done

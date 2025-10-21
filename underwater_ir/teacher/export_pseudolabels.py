@@ -136,6 +136,7 @@ def main() -> None:
     parser.add_argument("--input-root", type=str, default=None, help="Path to low-quality image directory (paired or unpaired).")
     parser.add_argument("--target-root", type=str, default=None, help="Path to ground-truth directory for paired export.")
     parser.add_argument("--output", type=str, required=True, help="Directory to store pseudo-label outputs.")
+    parser.add_argument("--clip-checkpoint", type=str, default=None, help="Path/URI to CLIP checkpoint when not using legacy config.")
     parser.add_argument("--prompts", type=str, default=str(ROOT / "prompts/degradation_prompts.json"))
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -194,8 +195,14 @@ def main() -> None:
             pin_memory=True,
         )
 
+    checkpoint = args.clip_checkpoint
+    if checkpoint is None and opt is not None:
+        checkpoint = opt["path"].get("daclip")
+    if checkpoint is None:
+        raise ValueError("No CLIP checkpoint provided; use --clip-checkpoint or legacy config.")
+
     clip_model, preprocess = open_clip.create_model_from_pretrained(
-        args.clip_model, pretrained=opt["path"]["daclip"]
+        args.clip_model, pretrained=checkpoint
     )
     clip_model = clip_model.to(args.device).eval()
     transform = preprocess or build_clip_transform()
