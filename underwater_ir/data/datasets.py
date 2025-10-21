@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple
 
+import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms as T
@@ -16,8 +17,12 @@ def list_image_files(root: Path) -> List[Path]:
     return sorted([p for p in root.rglob("*") if p.suffix.lower() in IMG_EXTS])
 
 
-def default_transform() -> Callable[[Image.Image], torch.Tensor]:
-    return T.Compose([T.ToTensor()])
+def default_transform(img_size: int = 256) -> Callable[[Image.Image], torch.Tensor]:
+    """Default transform: resize to square and convert to tensor"""
+    return T.Compose([
+        T.Resize((img_size, img_size), interpolation=T.InterpolationMode.BILINEAR),
+        T.ToTensor(),
+    ])
 
 
 @dataclass
@@ -119,9 +124,11 @@ def create_paired_train_loader(
     train_root: Path | str,
     batch_size: int,
     num_workers: int,
+    img_size: int = 256,
 ) -> DataLoader:
     train_root = Path(train_root)
-    dataset = PairedImageDataset(train_root / "input", train_root / "target")
+    transform = default_transform(img_size=img_size)
+    dataset = PairedImageDataset(train_root / "input", train_root / "target", transform=transform)
     return create_dataloader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
 
@@ -129,9 +136,11 @@ def create_paired_eval_loader(
     eval_root: Path | str,
     batch_size: int,
     num_workers: int,
+    img_size: int = 256,
 ) -> DataLoader:
     eval_root = Path(eval_root)
-    dataset = PairedImageDataset(eval_root / "input", eval_root / "target")
+    transform = default_transform(img_size=img_size)
+    dataset = PairedImageDataset(eval_root / "input", eval_root / "target", transform=transform)
     return create_dataloader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
 
@@ -139,6 +148,8 @@ def create_unpaired_eval_loader(
     eval_root: Path | str,
     batch_size: int,
     num_workers: int,
+    img_size: int = 256,
 ) -> DataLoader:
-    dataset = UnpairedImageDataset(eval_root)
+    transform = default_transform(img_size=img_size)
+    dataset = UnpairedImageDataset(eval_root, transform=transform)
     return create_dataloader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)

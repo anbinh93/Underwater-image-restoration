@@ -103,7 +103,7 @@ class EvalEntry:
     pseudo_root: Path
 
 
-def build_reference_eval_entries(root: Path, pseudo_root: Path, batch_size: int, num_workers: int) -> List[EvalEntry]:
+def build_reference_eval_entries(root: Path, pseudo_root: Path, batch_size: int, num_workers: int, img_size: int = 256) -> List[EvalEntry]:
     entries: List[EvalEntry] = []
     root = Path(root).expanduser()
     pseudo_root = Path(pseudo_root).expanduser()
@@ -120,12 +120,12 @@ def build_reference_eval_entries(root: Path, pseudo_root: Path, batch_size: int,
         target_dir = subdir / "target"
         if not input_dir.exists() or not target_dir.exists():
             continue
-        loader = create_paired_eval_loader(subdir, batch_size=batch_size, num_workers=num_workers)
+        loader = create_paired_eval_loader(subdir, batch_size=batch_size, num_workers=num_workers, img_size=img_size)
         entries.append(EvalEntry(subdir.name, loader, pseudo_root / subdir.name))
     return entries
 
 
-def build_nonref_eval_entries(root: Path, pseudo_root: Path, batch_size: int, num_workers: int) -> List[EvalEntry]:
+def build_nonref_eval_entries(root: Path, pseudo_root: Path, batch_size: int, num_workers: int, img_size: int = 256) -> List[EvalEntry]:
     entries: List[EvalEntry] = []
     root = Path(root).expanduser()
     pseudo_root = Path(pseudo_root).expanduser()
@@ -133,7 +133,7 @@ def build_nonref_eval_entries(root: Path, pseudo_root: Path, batch_size: int, nu
         return entries
     for subdir in sorted([d for d in root.iterdir() if d.is_dir()]):
         data_root = subdir / "input" if (subdir / "input").exists() else subdir
-        loader = create_unpaired_eval_loader(data_root, batch_size=batch_size, num_workers=num_workers)
+        loader = create_unpaired_eval_loader(data_root, batch_size=batch_size, num_workers=num_workers, img_size=img_size)
         entries.append(EvalEntry(subdir.name, loader, pseudo_root / subdir.name))
     return entries
 
@@ -221,6 +221,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--eval-batch-size", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--img-size", type=int, default=256, help="Input image size (all images will be resized to this)")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--loss-config", type=str, default=None, help="Optional JSON overriding loss weights.")
     parser.add_argument("--save-path", type=str, default="student_model.pt")
@@ -280,9 +281,9 @@ def main() -> None:
     num_masks = pseudo_sample["masks"].shape[0]
     num_degradation_types = args.num_degradations or pseudo_sample["global_prob"].numel()
 
-    train_loader = create_paired_train_loader(args.train_root, batch_size=args.batch_size, num_workers=args.num_workers)
-    ref_entries = build_reference_eval_entries(Path(args.val_ref_root), pseudo_val_ref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers)
-    nonref_entries = build_nonref_eval_entries(Path(args.val_nonref_root), pseudo_val_nonref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers)
+    train_loader = create_paired_train_loader(args.train_root, batch_size=args.batch_size, num_workers=args.num_workers, img_size=args.img_size)
+    ref_entries = build_reference_eval_entries(Path(args.val_ref_root), pseudo_val_ref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers, img_size=args.img_size)
+    nonref_entries = build_nonref_eval_entries(Path(args.val_nonref_root), pseudo_val_nonref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers, img_size=args.img_size)
 
     model = NAFNetWFIGate(
         in_channels=3,
