@@ -1,0 +1,85 @@
+# CLIP Configuration for DACLiP-UIR
+# Based on guided-underwater-restoration configuration style
+
+model_name: "CLIP"
+experiment_name: "daclip_student"
+
+# Device configuration
+device: "cuda"  # Options: cuda, cpu, auto
+
+# CLIP Model Configuration
+clip:
+  # Model selection
+  model_type: "openai_clip"  # Options: openai_clip, daclip_custom
+  
+  # For HuggingFace transformers CLIP (recommended for compatibility)
+  hf_model:
+    model_name: "openai/clip-vit-base-patch32"  # Options: openai/clip-vit-base-patch32, openai/clip-vit-large-patch14
+    processor_name: "openai/clip-vit-base-patch32"
+    use_transformers: true  # Use transformers library instead of open_clip
+    cache_dir: "./cache/clip_models"
+  
+  # For custom DACLiP model (legacy)
+  daclip_model:
+    model_name: "daclip_ViT-B-32"
+    checkpoint_path: "pretrained/daclip_ViT-B-32.pt"
+    use_custom_openclip: true
+    legacy_path: "legacy/third_party/universal-image-restoration"
+  
+  # Common settings
+  max_length: 77  # CLIP's standard text length
+  batch_size: 4
+  use_fp16: true
+  device: "auto"
+  image_size: 224  # CLIP standard input size
+  text_projection_dim: 512
+  vision_projection_dim: 512
+
+# Pseudo-label generation
+pseudo_labels:
+  output_dir: "pseudo-labels/daclip"
+  use_crf: true  # Use CRF for post-processing
+  num_workers: 4
+
+# Dataset Configuration
+data:
+  # Training data
+  train_root: "Dataset/train"
+  train_input: "Dataset/train/input"
+  train_target: "Dataset/train/target"
+  
+  # Validation data (reference)
+  val_ref_root: "Dataset/testset(ref)"
+  val_ref_datasets:
+    - "test-UIEB"
+    - "test-EUVP"
+    - "test-LSUI"
+  
+  # Validation data (non-reference)
+  val_nonref_root: "Dataset/testset(non-ref)"
+  val_nonref_datasets:
+    - "test-RUIE"
+  
+  # Image processing
+  image_size: 224
+  normalize: true
+
+# Training Configuration
+training:
+  epochs: 20
+  batch_size: 4
+  num_workers: 4
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  save_path: "experiments/daclip_student.pt"
+  checkpoint_interval: 5
+  
+# Evaluation Configuration
+evaluation:
+  metrics:
+    - "psnr"
+    - "ssim"
+    - "uciqe"  # Underwater Color Image Quality Evaluation
+    - "uiqm"   # Underwater Image Quality Measure
+  save_visualizations: true
+  visualization_dir: "results/visualizations"
