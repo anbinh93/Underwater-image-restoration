@@ -1,26 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Train the underwater student using DACLiP prompts (weights per README/app.py).
-# 1) Export pseudo-labels with the DACLiP ViT-B/32 checkpoint.
+# Train the underwater student using OpenAI CLIP ViT-B/32
+# 1) Export pseudo-labels with OpenAI CLIP checkpoint.
 # 2) Train the student against Dataset/train with benchmark evaluation.
 
-# Ensure the DACLiP weight is downloaded (see README/app.py).
-CLIP_MODEL="daclip_ViT-B-32"
-CLIP_CKPT="pretrained/daclip_ViT-B-32.pt"
+# NOTE: Model "openai/clip-vit-base-patch32" from HF doesn't exist in open_clip format.
+# The correct way to use OpenAI's ViT-B/32 CLIP with open_clip is:
+#   Model: "ViT-B-32" with Checkpoint: "openai"
+# This will auto-download from OpenAI's official release.
+CLIP_MODEL="ViT-B-32"
+CLIP_CKPT="openai"
 TRAIN_ROOT="Dataset/train"
 VAL_REF_ROOT="Dataset/testset(ref)"
 VAL_NONREF_ROOT="Dataset/testset(non-ref)"
-PSEUDO_ROOT="pseudo-labels/clip_hf"
-SAVE_PATH="experiments/clip_hf_student.pt"
+PSEUDO_ROOT="pseudo-labels/openai_clip"
+SAVE_PATH="experiments/openai_clip_student.pt"
 EPOCHS=20
 BATCH=4
 WORKERS=4
 
-if [[ ! -f "${CLIP_CKPT}" ]]; then
-  echo "Expected DACLiP checkpoint at ${CLIP_CKPT}. Download per README before running." >&2
-  exit 1
-fi
+# Ensure we're in the project root
+cd "$(dirname "$0")"
 
 # Stage 1: export pseudo labels (train split here; add val splits if needed)
 mkdir -p "${PSEUDO_ROOT}/train"

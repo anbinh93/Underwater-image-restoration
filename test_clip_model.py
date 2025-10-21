@@ -40,16 +40,19 @@ try:
 except Exception as e:
     print(f"⚠️ Could not list models: {e}")
 
-# Test loading the specific model
-print("\n[3/3] Testing model load: hf-hub:openai/clip-vit-base-patch32")
+# Test loading OpenAI's official CLIP model
+print("\n[3/3] Testing model load: ViT-B-32 with openai checkpoint")
 try:
     import torch
     
-    model_id = "hf-hub:openai/clip-vit-base-patch32"
-    print(f"   Loading {model_id}...")
+    model_name = "ViT-B-32"
+    checkpoint = "openai"
+    print(f"   Loading {model_name} with {checkpoint} checkpoint...")
     
     with torch.no_grad():
-        model, preprocess = open_clip.create_model_from_pretrained(model_id)
+        model, preprocess = open_clip.create_model_from_pretrained(
+            model_name, pretrained=checkpoint
+        )
     
     print(f"✅ Model loaded successfully!")
     print(f"   Model type: {type(model)}")
@@ -60,7 +63,7 @@ try:
         print(f"   Visual grid size: {model.visual.grid_size}")
     
     # Test tokenizer
-    tokenizer = open_clip.get_tokenizer(model_id)
+    tokenizer = open_clip.get_tokenizer(model_name)
     test_text = ["a photo of underwater scene", "clear water"]
     tokens = tokenizer(test_text)
     print(f"✅ Tokenizer works! Shape: {tokens.shape}")
@@ -74,5 +77,6 @@ except Exception as e:
 print("\n" + "=" * 80)
 print("✅ ALL TESTS PASSED!")
 print("=" * 80)
-print("\nThe model 'hf-hub:openai/clip-vit-base-patch32' can be used successfully.")
-print("You can now run: bash run_clip_training.sh")
+print(f"\nThe model '{model_name}' with '{checkpoint}' checkpoint loaded successfully!")
+print("This is OpenAI's official CLIP ViT-B/32 model.")
+print("\nYou can now run: bash run_clip_training.sh")
