@@ -4,14 +4,18 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 
 from underwater_ir.data import (
     create_paired_eval_loader,
@@ -23,6 +27,35 @@ from .naf_unet_wfi import NAFNetWFIGate
 from .losses.distill_losses import ContrastiveInfoNCELoss, FeatureAlignmentLoss, KLDivergenceLoss
 from .losses.freq_losses import FrequencyLoss, RegionLoss, TotalVariationLoss
 from .losses.perceptual import PerceptualLoss
+
+
+def setup_ddp(rank: int, world_size: int) -> None:
+    """Initialize distributed training"""
+    os.environ['MASTER_ADDR'] = os.environ.get('MASTER_ADDR', 'localhost')
+    os.environ['MASTER_PORT'] = os.environ.get('MASTER_PORT', '12355')
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+
+def cleanup_ddp() -> None:
+    """Cleanup distributed training"""
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def is_main_process() -> bool:
+    """Check if current process is the main process (rank 0)"""
+    return not dist.is_initialized() or dist.get_rank() == 0
+
+
+def get_rank() -> int:
+    """Get current process rank"""
+    return dist.get_rank() if dist.is_initialized() else 0
+
+
+def get_world_size() -> int:
+    """Get total number of processes"""
+    return dist.get_world_size() if dist.is_initialized() else 1
 
 
 def charbonnier_loss(pred: torch.Tensor, target: torch.Tensor, epsilon: float = 1e-3) -> torch.Tensor:
@@ -226,12 +259,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loss-config", type=str, default=None, help="Optional JSON overriding loss weights.")
     parser.add_argument("--save-path", type=str, default="student_model.pt")
     parser.add_argument("--num-degradations", type=int, default=None, help="Number of degradation categories for student head.")
+    
+    # DDP arguments
+    parser.add_argument("--ddp", action="store_true", help="Enable Distributed Data Parallel training")
+    parser.add_argument("--local-rank", type=int, default=0, help="Local rank for distributed training (auto-set by torch.distributed.launch)")
+    parser.add_argument("--world-size", type=int, default=1, help="Number of processes for distributed training")
+    
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    device = torch.device(args.device)
+    
+    # Setup DDP if enabled
+    if args.ddp:
+        # Get rank from environment (set by torchrun or torch.distributed.launch)
+        local_rank = int(os.environ.get("LOCAL_RANK", args.local_rank))
+        world_size = int(os.environ.get("WORLD_SIZE", args.world_size))
+        setup_ddp(local_rank, world_size)
+        device = torch.device(f"cuda:{local_rank}")
+        args.local_rank = local_rank
+        args.world_size = world_size
+    else:
+        device = torch.device(args.device)
+        local_rank = 0
+        world_size = 1
+
+    # Only print from main process
+    def print_main(*msg):
+        if is_main_process():
+            print(*msg)
 
     pseudo_root = Path(args.pseudo_root).expanduser().resolve()
     pseudo_train_root = Path(args.pseudo_train_root).expanduser().resolve() if args.pseudo_train_root else pseudo_root / "train"
@@ -281,9 +338,43 @@ def main() -> None:
     num_masks = pseudo_sample["masks"].shape[0]
     num_degradation_types = args.num_degradations or pseudo_sample["global_prob"].numel()
 
-    train_loader = create_paired_train_loader(args.train_root, batch_size=args.batch_size, num_workers=args.num_workers, img_size=args.img_size)
-    ref_entries = build_reference_eval_entries(Path(args.val_ref_root), pseudo_val_ref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers, img_size=args.img_size)
-    nonref_entries = build_nonref_eval_entries(Path(args.val_nonref_root), pseudo_val_nonref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers, img_size=args.img_size)
+    # Create DistributedSampler for DDP
+    train_sampler = None
+    if args.ddp:
+        from torch.utils.data import DataLoader
+        from underwater_ir.data.datasets import PairedImageDataset
+        from torchvision import transforms as T
+        
+        train_root = Path(args.train_root)
+        transform = T.Compose([
+            T.Resize((args.img_size, args.img_size), interpolation=T.InterpolationMode.BILINEAR),
+            T.ToTensor(),
+        ])
+        train_dataset = PairedImageDataset(train_root / "input", train_root / "target", transform=transform)
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=world_size,
+            rank=local_rank,
+            shuffle=True,
+            drop_last=False
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            sampler=train_sampler,
+            num_workers=args.num_workers,
+            pin_memory=True,
+        )
+    else:
+        train_loader = create_paired_train_loader(args.train_root, batch_size=args.batch_size, num_workers=args.num_workers, img_size=args.img_size)
+    
+    # Only main process evaluates
+    if is_main_process():
+        ref_entries = build_reference_eval_entries(Path(args.val_ref_root), pseudo_val_ref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers, img_size=args.img_size)
+        nonref_entries = build_nonref_eval_entries(Path(args.val_nonref_root), pseudo_val_nonref_root, batch_size=args.eval_batch_size, num_workers=args.num_workers, img_size=args.img_size)
+    else:
+        ref_entries = []
+        nonref_entries = []
 
     model = NAFNetWFIGate(
         in_channels=3,
@@ -295,7 +386,12 @@ def main() -> None:
         num_masks=num_masks,
         num_degradation_types=num_degradation_types,
     ).to(device)
-
+    
+    # Wrap model with DDP if enabled
+    if args.ddp:
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+        print_main(f"✅ DDP enabled: training on {world_size} GPUs")
+    
     l1_weight = 1.0
     ssim_weight = 0.2
     perc_weight = 0.05
@@ -332,6 +428,10 @@ def main() -> None:
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     for epoch in range(args.epochs):
+        # Set epoch for DistributedSampler
+        if args.ddp and train_sampler is not None:
+            train_sampler.set_epoch(epoch)
+        
         model.train()
         running_loss = 0.0
         for batch in train_loader:
@@ -385,23 +485,42 @@ def main() -> None:
 
             running_loss += total_loss.item()
 
-        torch.save(model.state_dict(), args.save_path)
-        avg_loss = running_loss / len(train_loader)
-        print(f"Epoch {epoch + 1}/{args.epochs} - Train loss: {avg_loss:.4f}")
-
-        if ref_entries:
-            ref_metrics = evaluate_reference(model, ref_entries, device)
-            for name, metrics in ref_metrics.items():
-                print(f"[Ref] {name}: PSNR={metrics['psnr']:.2f} dB, SSIM={metrics['ssim']:.4f}")
+        # Synchronize loss across all processes for DDP
+        if args.ddp:
+            avg_loss_tensor = torch.tensor(running_loss / len(train_loader), device=device)
+            dist.all_reduce(avg_loss_tensor, op=dist.ReduceOp.AVG)
+            avg_loss = avg_loss_tensor.item()
         else:
-            print("No reference evaluation datasets found.")
+            avg_loss = running_loss / len(train_loader)
+        
+        # Only main process saves and evaluates
+        if is_main_process():
+            # Save model (unwrap DDP if needed)
+            model_to_save = model.module if args.ddp else model
+            torch.save(model_to_save.state_dict(), args.save_path)
+            print_main(f"Epoch {epoch + 1}/{args.epochs} - Train loss: {avg_loss:.4f}")
 
-        if nonref_entries:
-            nonref_metrics = evaluate_non_reference(model, nonref_entries, device)
-            for name, metrics in nonref_metrics.items():
-                print(f"[Non-Ref] {name}: UIQM={metrics['uiqm']:.3f}, UCIQE={metrics['uciqe']:.3f}")
-        else:
-            print("No non-reference evaluation datasets found.")
+            if ref_entries:
+                ref_metrics = evaluate_reference(model, ref_entries, device)
+                for name, metrics in ref_metrics.items():
+                    print_main(f"[Ref] {name}: PSNR={metrics['psnr']:.2f} dB, SSIM={metrics['ssim']:.4f}")
+            else:
+                print_main("No reference evaluation datasets found.")
+
+            if nonref_entries:
+                nonref_metrics = evaluate_non_reference(model, nonref_entries, device)
+                for name, metrics in nonref_metrics.items():
+                    print_main(f"[Non-Ref] {name}: UIQM={metrics['uiqm']:.3f}, UCIQE={metrics['uciqe']:.3f}")
+            else:
+                print_main("No non-reference evaluation datasets found.")
+        
+        # Synchronize all processes after evaluation
+        if args.ddp:
+            dist.barrier()
+    
+    # Cleanup DDP
+    if args.ddp:
+        cleanup_ddp()
 
 
 if __name__ == "__main__":

@@ -110,11 +110,13 @@ def create_dataloader(
     batch_size: int = 4,
     shuffle: bool = False,
     num_workers: int = 4,
+    sampler = None,
 ) -> DataLoader:
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=(shuffle and sampler is None),  # Don't shuffle if using sampler
+        sampler=sampler,
         num_workers=num_workers,
         pin_memory=True,
     )
@@ -125,11 +127,12 @@ def create_paired_train_loader(
     batch_size: int,
     num_workers: int,
     img_size: int = 256,
+    sampler = None,
 ) -> DataLoader:
     train_root = Path(train_root)
     transform = default_transform(img_size=img_size)
     dataset = PairedImageDataset(train_root / "input", train_root / "target", transform=transform)
-    return create_dataloader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    return create_dataloader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, sampler=sampler)
 
 
 def create_paired_eval_loader(
