@@ -47,6 +47,17 @@ utils_stub = types.ModuleType("utils")
 utils_stub.OrderedYaml = _ordered_yaml
 sys.modules.setdefault("utils", utils_stub)
 
+DACLiP = None
+daclip_module_path = LEGACY_ROOT / "open_clip" / "daclip_model.py"
+if daclip_module_path.exists():
+    import importlib.util
+
+    daclip_spec = importlib.util.spec_from_file_location("legacy_daclip_model", daclip_module_path)
+    if daclip_spec and daclip_spec.loader:
+        daclip_module = importlib.util.module_from_spec(daclip_spec)
+        daclip_spec.loader.exec_module(daclip_module)
+        DACLiP = getattr(daclip_module, "DaCLIP", None)
+
 if __package__ in (None, "", "__main__"):
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
@@ -64,6 +75,8 @@ else:
         create_dataloader as create_simple_dataloader,
     )
 
+
+sys.modules.pop("open_clip", None)
 sys.path.insert(0, str(LEGACY_ROOT))
 sys.path.insert(0, str(LEGACY_ROOT / "config" / "daclip-sde"))
 
@@ -87,7 +100,12 @@ if option is not None:
             data_spec.loader.exec_module(legacy_data_module)
             create_dataset = getattr(legacy_data_module, "create_dataset", None)
 
-import open_clip  # noqa: E402
+try:
+    import open_clip  # noqa: E402
+except ModuleNotFoundError as exc:  # pragma: no cover
+    raise RuntimeError(
+        "open_clip dependencies missing (ftfy, sentencepiece). Install them before exporting pseudo-labels."
+    ) from exc
 
 from .deg_coder import DegradationCoder
 from .mask_head import MaskHead
@@ -215,6 +233,15 @@ def main() -> None:
         clip_model, preprocess = open_clip.create_model_from_pretrained(
             args.clip_model, pretrained=checkpoint
         )
+    if not hasattr(clip_model, "visual_control"):
+        if DACLiP is None:
+            raise RuntimeError(
+                "Selected CLIP model does not provide visual_control and DACLiP wrapper is unavailable."
+            )
+        clip_model = DACLiP(clip_model)
+        if hasattr(clip_model, "initial_controller"):
+            clip_model.initial_controller()
+
     clip_model = clip_model.to(args.device).eval()
     transform = preprocess or build_clip_transform()
 

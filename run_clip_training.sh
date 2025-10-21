@@ -1,29 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Train the underwater student using OpenAI CLIP ViT-B/32
-# 1) Export pseudo-labels with OpenAI CLIP checkpoint.
-# 2) Train the student against Dataset/train with benchmark evaluation.
+# Train the underwater student using DACLiP ViT-B/32 (per README/app.py).
+# 1) Export pseudo-labels with DACLiP checkpoints.
+# 2) Train the student with evaluation on reference/non-reference benchmarks.
 
-# NOTE: Model "openai/clip-vit-base-patch32" from HF doesn't exist in open_clip format.
-# The correct way to use OpenAI's ViT-B/32 CLIP with open_clip is:
-#   Model: "ViT-B-32" with Checkpoint: "openai"
-# This will auto-download from OpenAI's official release.
-CLIP_MODEL="ViT-B-32"
-CLIP_CKPT="openai"
+CLIP_MODEL="daclip_ViT-B-32"
+CLIP_CKPT="pretrained/daclip_ViT-B-32.pt"
 TRAIN_ROOT="Dataset/train"
 VAL_REF_ROOT="Dataset/testset(ref)"
 VAL_NONREF_ROOT="Dataset/testset(non-ref)"
-PSEUDO_ROOT="pseudo-labels/openai_clip"
-SAVE_PATH="experiments/openai_clip_student.pt"
+PSEUDO_ROOT="pseudo-labels/daclip"
+SAVE_PATH="experiments/daclip_student.pt"
 EPOCHS=20
 BATCH=4
 WORKERS=4
 
-# Ensure we're in the project root
-cd "$(dirname "$0")"
+if [[ ! -f "${CLIP_CKPT}" ]]; then
+  echo "Expected DACLiP checkpoint at ${CLIP_CKPT}. Please download per README." >&2
+  exit 1
+fi
 
-# Stage 1: export pseudo labels (train split here; add val splits if needed)
+python - <<'PY'
+try:
+    import ftfy, sentencepiece  # noqa: F401
+except ImportError as exc:
+    raise SystemExit("Missing dependencies (ftfy, sentencepiece). Install them before running.") from exc
+PY
+
 mkdir -p "${PSEUDO_ROOT}/train"
 python -m underwater_ir.teacher.export_pseudolabels \
   --input-root "${TRAIN_ROOT}/input" \
@@ -34,9 +38,8 @@ python -m underwater_ir.teacher.export_pseudolabels \
   --use-crf \
   --num-workers "${WORKERS}"
 
-# Stage 1b: export pseudo labels for reference benchmarks
 for subset_dir in "${VAL_REF_ROOT}"/*; do
-  [ -d "${subset_dir}" ] || continue
+  [[ -d "${subset_dir}" ]] || continue
   subset="$(basename "${subset_dir}")"
   mkdir -p "${PSEUDO_ROOT}/testset_ref/${subset}"
   python -m underwater_ir.teacher.export_pseudolabels \
@@ -49,14 +52,11 @@ for subset_dir in "${VAL_REF_ROOT}"/*; do
     --num-workers "${WORKERS}"
 done
 
-# Stage 1c: export pseudo labels for non-reference benchmarks
 for subset_dir in "${VAL_NONREF_ROOT}"/*; do
-  [ -d "${subset_dir}" ] || continue
+  [[ -d "${subset_dir}" ]] || continue
   subset="$(basename "${subset_dir}")"
   input_dir="${subset_dir}/input"
-  if [[ ! -d "${input_dir}" ]]; then
-    input_dir="${subset_dir}"
-  fi
+  [[ -d "${input_dir}" ]] || input_dir="${subset_dir}"
   mkdir -p "${PSEUDO_ROOT}/testset_nonref/${subset}"
   python -m underwater_ir.teacher.export_pseudolabels \
     --input-root "${input_dir}" \
@@ -67,7 +67,6 @@ for subset_dir in "${VAL_NONREF_ROOT}"/*; do
     --num-workers "${WORKERS}"
 done
 
-# Stage 2: student training + evaluation
 python -m underwater_ir.student.train_student \
   --train-root "${TRAIN_ROOT}" \
   --val-ref-root "${VAL_REF_ROOT}" \
