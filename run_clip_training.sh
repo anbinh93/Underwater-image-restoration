@@ -25,6 +25,37 @@ python underwater_ir/teacher/export_pseudolabels.py \
   --use-crf \
   --num-workers "${WORKERS}"
 
+# Stage 1b: export pseudo labels for reference benchmarks
+for subset_dir in "${VAL_REF_ROOT}"/*; do
+  [ -d "${subset_dir}" ] || continue
+  subset="$(basename "${subset_dir}")"
+  mkdir -p "${PSEUDO_ROOT}/testset_ref/${subset}"
+  python underwater_ir/teacher/export_pseudolabels.py \
+    --input-root "${subset_dir}/input" \
+    --target-root "${subset_dir}/target" \
+    --output "${PSEUDO_ROOT}/testset_ref/${subset}" \
+    --clip-model "${HF_MODEL}" \
+    --use-crf \
+    --num-workers "${WORKERS}"
+done
+
+# Stage 1c: export pseudo labels for non-reference benchmarks
+for subset_dir in "${VAL_NONREF_ROOT}"/*; do
+  [ -d "${subset_dir}" ] || continue
+  subset="$(basename "${subset_dir}")"
+  input_dir="${subset_dir}/input"
+  if [[ ! -d "${input_dir}" ]]; then
+    input_dir="${subset_dir}"
+  fi
+  mkdir -p "${PSEUDO_ROOT}/testset_nonref/${subset}"
+  python underwater_ir/teacher/export_pseudolabels.py \
+    --input-root "${input_dir}" \
+    --output "${PSEUDO_ROOT}/testset_nonref/${subset}" \
+    --clip-model "${HF_MODEL}" \
+    --use-crf \
+    --num-workers "${WORKERS}"
+done
+
 # Stage 2: student training + evaluation
 python underwater_ir/student/train_student.py \
   --train-root "${TRAIN_ROOT}" \
