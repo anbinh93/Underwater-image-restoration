@@ -6,7 +6,6 @@ set -euo pipefail
 # 2) Train the student against Dataset/train with benchmark evaluation.
 
 HF_MODEL="hf-hub:openai/clip-vit-base-patch32"
-CONFIG="legacy/third_party/universal-image-restoration/config/daclip-sde/options/test.yml"
 TRAIN_ROOT="Dataset/train"
 VAL_REF_ROOT="Dataset/testset(ref)"
 VAL_NONREF_ROOT="Dataset/testset(non-ref)"
@@ -19,8 +18,8 @@ WORKERS=4
 # Stage 1: export pseudo labels (train split here; add val splits if needed)
 mkdir -p "${PSEUDO_ROOT}/train"
 python underwater_ir/teacher/export_pseudolabels.py \
-  --config "${CONFIG}" \
-  --dataset train \
+  --input-root "${TRAIN_ROOT}/input" \
+  --target-root "${TRAIN_ROOT}/target" \
   --output "${PSEUDO_ROOT}/train" \
   --clip-model "${HF_MODEL}" \
   --use-crf \
