@@ -5,8 +5,6 @@ __pycache__/
 Dataset/
 dataset/
 datasets/
-data/
-Data/
 *.tar
 *.zip
 *.tar.gz

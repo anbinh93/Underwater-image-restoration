@@ -48,14 +48,21 @@ utils_stub.OrderedYaml = _ordered_yaml
 sys.modules.setdefault("utils", utils_stub)
 
 if __package__ in (None, "", "__main__"):
-    sys.path.insert(0, str(ROOT))
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    # ensure package context for relative imports
     __package__ = "underwater_ir.teacher"
-
-from ..data.datasets import (  # type: ignore
-    PairedImageDataset,
-    UnpairedImageDataset,
-    create_dataloader as create_simple_dataloader,
-)
+    from underwater_ir.data.datasets import (  # type: ignore  # noqa: E402
+        PairedImageDataset,
+        UnpairedImageDataset,
+        create_dataloader as create_simple_dataloader,
+    )
+else:
+    from ..data.datasets import (  # type: ignore
+        PairedImageDataset,
+        UnpairedImageDataset,
+        create_dataloader as create_simple_dataloader,
+    )
 
 sys.path.insert(0, str(LEGACY_ROOT))
 sys.path.insert(0, str(LEGACY_ROOT / "config" / "daclip-sde"))
