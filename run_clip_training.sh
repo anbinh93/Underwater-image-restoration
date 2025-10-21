@@ -15,9 +15,12 @@ EPOCHS=20
 BATCH=4
 WORKERS=4
 
+# Ensure we're in the project root
+cd "$(dirname "$0")"
+
 # Stage 1: export pseudo labels (train split here; add val splits if needed)
 mkdir -p "${PSEUDO_ROOT}/train"
-python underwater_ir/teacher/export_pseudolabels.py \
+python -m underwater_ir.teacher.export_pseudolabels \
   --input-root "${TRAIN_ROOT}/input" \
   --target-root "${TRAIN_ROOT}/target" \
   --output "${PSEUDO_ROOT}/train" \
@@ -30,7 +33,7 @@ for subset_dir in "${VAL_REF_ROOT}"/*; do
   [ -d "${subset_dir}" ] || continue
   subset="$(basename "${subset_dir}")"
   mkdir -p "${PSEUDO_ROOT}/testset_ref/${subset}"
-  python underwater_ir/teacher/export_pseudolabels.py \
+  python -m underwater_ir.teacher.export_pseudolabels \
     --input-root "${subset_dir}/input" \
     --target-root "${subset_dir}/target" \
     --output "${PSEUDO_ROOT}/testset_ref/${subset}" \
@@ -48,7 +51,7 @@ for subset_dir in "${VAL_NONREF_ROOT}"/*; do
     input_dir="${subset_dir}"
   fi
   mkdir -p "${PSEUDO_ROOT}/testset_nonref/${subset}"
-  python underwater_ir/teacher/export_pseudolabels.py \
+  python -m underwater_ir.teacher.export_pseudolabels \
     --input-root "${input_dir}" \
     --output "${PSEUDO_ROOT}/testset_nonref/${subset}" \
     --clip-model "${HF_MODEL}" \
@@ -57,7 +60,7 @@ for subset_dir in "${VAL_NONREF_ROOT}"/*; do
 done
 
 # Stage 2: student training + evaluation
-python underwater_ir/student/train_student.py \
+python -m underwater_ir.student.train_student \
   --train-root "${TRAIN_ROOT}" \
   --val-ref-root "${VAL_REF_ROOT}" \
   --val-nonref-root "${VAL_NONREF_ROOT}" \
