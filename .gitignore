@@ -1,1 +1,42 @@
 .DS_Store
+__pycache__/
+
+# Datasets
+Dataset/
+dataset/
+datasets/
+data/
+Data/
+*.tar
+*.zip
+*.tar.gz
+*.rar
+
+# Logs and checkpoints
+logs/
+log/
+checkpoints/
+experiments/
+pretrained/
+weights/
+
+# Vendor
+vendor/
+
+# Python
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
