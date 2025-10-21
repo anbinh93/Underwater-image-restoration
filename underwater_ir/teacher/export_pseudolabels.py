@@ -17,9 +17,18 @@ from torchvision.transforms import Compose, Resize, CenterCrop, Normalize, ToTen
 ROOT = Path(__file__).resolve().parents[2]
 LEGACY_ROOT = ROOT / "legacy" / "third_party" / "universal-image-restoration"
 sys.path.insert(0, str(LEGACY_ROOT))
+sys.path.insert(0, str(LEGACY_ROOT / "config" / "daclip-sde"))
 
 import options as option  # type: ignore  # noqa: E402
-from data import create_dataset  # type: ignore  # noqa: E402
+import importlib.util
+
+data_spec = importlib.util.spec_from_file_location("data", LEGACY_ROOT / "data" / "__init__.py")
+if data_spec is None or data_spec.loader is None:
+    raise ImportError(f"Failed to locate legacy data module at {LEGACY_ROOT / 'data' / '__init__.py'}")
+data_module = importlib.util.module_from_spec(data_spec)
+data_spec.loader.exec_module(data_module)
+sys.modules.setdefault("data", data_module)
+create_dataset = data_module.create_dataset
 
 import open_clip  # noqa: E402
 
