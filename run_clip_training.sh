@@ -1,18 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Train the underwater student using CLIP encoder prompts exported from a Hugging Face checkpoint.
-# 1) Export pseudo-labels with the CLIP HF weight.
+# Train the underwater student using DACLiP prompts (weights per README/app.py).
+# 1) Export pseudo-labels with the DACLiP ViT-B/32 checkpoint.
 # 2) Train the student against Dataset/train with benchmark evaluation.
 
-# Use OpenAI's CLIP model from Hugging Face
-# Format for Hugging Face models in open_clip: "hf-hub:organization/model-name"
-# Options:
-#   - "hf-hub:openai/clip-vit-base-patch32" (OpenAI ViT-B/32 from HF)
-#   - "hf-hub:openai/clip-vit-large-patch14" (OpenAI ViT-L/14 from HF)
-#   - "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K" (LAION trained)
-CLIP_MODEL="hf-hub:openai/clip-vit-base-patch32"
-CLIP_CKPT=""  # Leave empty for HF models (checkpoint is in model ID)
+# Ensure the DACLiP weight is downloaded (see README/app.py).
+CLIP_MODEL="daclip_ViT-B-32"
+CLIP_CKPT="pretrained/daclip_ViT-B-32.pt"
 TRAIN_ROOT="Dataset/train"
 VAL_REF_ROOT="Dataset/testset(ref)"
 VAL_NONREF_ROOT="Dataset/testset(non-ref)"
@@ -22,8 +17,10 @@ EPOCHS=20
 BATCH=4
 WORKERS=4
 
-# Ensure we're in the project root
-cd "$(dirname "$0")"
+if [[ ! -f "${CLIP_CKPT}" ]]; then
+  echo "Expected DACLiP checkpoint at ${CLIP_CKPT}. Download per README before running." >&2
+  exit 1
+fi
 
 # Stage 1: export pseudo labels (train split here; add val splits if needed)
 mkdir -p "${PSEUDO_ROOT}/train"
@@ -32,6 +29,7 @@ python -m underwater_ir.teacher.export_pseudolabels \
   --target-root "${TRAIN_ROOT}/target" \
   --output "${PSEUDO_ROOT}/train" \
   --clip-model "${CLIP_MODEL}" \
+  --clip-checkpoint "${CLIP_CKPT}" \
   --use-crf \
   --num-workers "${WORKERS}"
 
@@ -45,6 +43,7 @@ for subset_dir in "${VAL_REF_ROOT}"/*; do
     --target-root "${subset_dir}/target" \
     --output "${PSEUDO_ROOT}/testset_ref/${subset}" \
     --clip-model "${CLIP_MODEL}" \
+    --clip-checkpoint "${CLIP_CKPT}" \
     --use-crf \
     --num-workers "${WORKERS}"
 done
@@ -62,6 +61,7 @@ for subset_dir in "${VAL_NONREF_ROOT}"/*; do
     --input-root "${input_dir}" \
     --output "${PSEUDO_ROOT}/testset_nonref/${subset}" \
     --clip-model "${CLIP_MODEL}" \
+    --clip-checkpoint "${CLIP_CKPT}" \
     --use-crf \
     --num-workers "${WORKERS}"
 done
