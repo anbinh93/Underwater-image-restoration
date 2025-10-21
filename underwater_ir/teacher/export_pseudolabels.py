@@ -18,20 +18,14 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 ROOT = PACKAGE_ROOT.parent
 LEGACY_ROOT = ROOT / "legacy" / "third_party" / "universal-image-restoration"
 
-if __package__:
-    from ..data.datasets import (  # type: ignore
-        PairedImageDataset,
-        UnpairedImageDataset,
-        create_dataloader as create_simple_dataloader,
-    )
-else:  # pragma: no cover - executed when run as script
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from underwater_ir.data.datasets import (  # type: ignore
-        PairedImageDataset,
-        UnpairedImageDataset,
-        create_dataloader as create_simple_dataloader,
-    )
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from underwater_ir.data.datasets import (  # type: ignore
+    PairedImageDataset,
+    UnpairedImageDataset,
+    create_dataloader as create_simple_dataloader,
+)
 
 sys.path.insert(0, str(LEGACY_ROOT))
 sys.path.insert(0, str(LEGACY_ROOT / "config" / "daclip-sde"))
@@ -40,6 +34,19 @@ try:
     import options as option  # type: ignore  # noqa: E402
 except ModuleNotFoundError:
     option = None  # type: ignore
+else:
+    if not hasattr(option, "OrderedYaml"):
+        import importlib.util
+
+        utils_path = LEGACY_ROOT / "utils.py"
+        ordered = None
+        if utils_path.exists():
+            utils_spec = importlib.util.spec_from_file_location("legacy_utils", utils_path)
+            if utils_spec and utils_spec.loader:
+                utils_module = importlib.util.module_from_spec(utils_spec)
+                utils_spec.loader.exec_module(utils_module)
+                ordered = getattr(utils_module, "OrderedYaml", None)
+        option.OrderedYaml = ordered
 
 create_dataset = None
 if option is not None:

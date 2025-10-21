@@ -1,4 +1,3 @@
-from .q_learning import QLearningAgent, EnhancementAction
-from .infer_adapt import adapt_image
+from .q_learning import QLearningAgent, EnhancementAction  # noqa: F401
 
-__all__ = ["QLearningAgent", "EnhancementAction", "adapt_image"]
+__all__ = ["QLearningAgent", "EnhancementAction"]
