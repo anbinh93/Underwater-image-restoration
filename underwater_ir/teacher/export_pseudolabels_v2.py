@@ -198,13 +198,37 @@ def export_pseudolabels(
     print(f"Processing {len(dataloader)} batches...")
     
     for batch_idx, batch in enumerate(dataloader):
+        # Handle None or empty batch
+        if batch is None:
+            print(f"Warning: Batch {batch_idx} is None, skipping...")
+            continue
+        
+        # Handle dictionary format
         if isinstance(batch, dict):
-            images = batch.get("lq", batch.get("input"))
-            gt_images = batch.get("gt", batch.get("target"))
-            names = batch.get("name", [f"image_{i}" for i in range(len(images))])
-        else:
+            images = batch.get("lq") or batch.get("input") or batch.get("image")
+            gt_images = batch.get("gt") or batch.get("target")
+            names = batch.get("name") or batch.get("filename")
+            
+            if images is None:
+                print(f"Warning: No images in batch {batch_idx}, skipping...")
+                print(f"Available keys: {list(batch.keys())}")
+                continue
+        
+        # Handle tuple/list format
+        elif isinstance(batch, (tuple, list)):
+            if len(batch) == 0:
+                print(f"Warning: Empty batch {batch_idx}, skipping...")
+                continue
             images = batch[0]
             gt_images = batch[1] if len(batch) > 1 else None
+            names = batch[2] if len(batch) > 2 else None
+        
+        else:
+            print(f"Warning: Unknown batch type {type(batch)}, skipping...")
+            continue
+        
+        # Generate default names if None
+        if names is None:
             names = [f"image_{batch_idx}_{i}" for i in range(len(images))]
         
         images = images.to(device)
