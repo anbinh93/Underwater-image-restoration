@@ -15,9 +15,22 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Resize, CenterCrop, Normalize, ToTensor, InterpolationMode
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
-
 LEGACY_ROOT = ROOT / "legacy" / "third_party" / "universal-image-restoration"
+
+try:
+    from ..data.datasets import (
+        PairedImageDataset,
+        UnpairedImageDataset,
+        create_dataloader as create_simple_dataloader,
+    )
+except ImportError:  # pragma: no cover - fallback for script execution
+    sys.path.insert(0, str(ROOT))
+    from underwater_ir.data.datasets import (  # type: ignore
+        PairedImageDataset,
+        UnpairedImageDataset,
+        create_dataloader as create_simple_dataloader,
+    )
+
 sys.path.insert(0, str(LEGACY_ROOT))
 sys.path.insert(0, str(LEGACY_ROOT / "config" / "daclip-sde"))
 
@@ -25,12 +38,6 @@ try:
     import options as option  # type: ignore  # noqa: E402
 except ModuleNotFoundError:
     option = None  # type: ignore
-
-from underwater_ir.data.datasets import (
-    PairedImageDataset,
-    UnpairedImageDataset,
-    create_dataloader as create_simple_dataloader,
-)
 
 create_dataset = None
 if option is not None:
