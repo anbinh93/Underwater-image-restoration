@@ -80,19 +80,35 @@ if [[ ! -d "${PSEUDO_ROOT}/train" ]]; then
   exit 1
 fi
 
-pt_files=$(find "${PSEUDO_ROOT}/train" -name "*.pt" -type f)
-pt_count=$(echo "$pt_files" | grep -c "\.pt$" || echo 0)
+# Check for both .pt and .npy formats
+pt_files=$(find "${PSEUDO_ROOT}/train" -name "*.pt" -type f 2>/dev/null || true)
+pt_count=$(echo "$pt_files" | grep -c "\.pt$" 2>/dev/null || echo 0)
 
-if [[ $pt_count -eq 0 ]]; then
-  echo "❌ ERROR: No .pt files found in ${PSEUDO_ROOT}/train" >&2
+npy_files=$(find "${PSEUDO_ROOT}/train" -name "*_features.npy" -type f 2>/dev/null || true)
+npy_count=$(echo "$npy_files" | grep -c "_features\.npy$" 2>/dev/null || echo 0)
+
+total_count=$((pt_count + npy_count))
+
+if [[ $total_count -eq 0 ]]; then
+  echo "❌ ERROR: No pseudo-label files found in ${PSEUDO_ROOT}/train" >&2
+  echo "   Expected either .pt files or *_features.npy files" >&2
   echo "   Export may have failed silently. Check logs above." >&2
   exit 1
 fi
 
 echo "✅ Export successful!"
 echo "   Output directory: ${PSEUDO_ROOT}/train"
-echo "   Pseudo-label files: ${pt_count}"
-echo "   Sample files:"
+if [[ $pt_count -gt 0 ]]; then
+  echo "   Pseudo-label files (.pt format): ${pt_count}"
+  echo "   Sample .pt files:"
+  echo "$pt_files" | head -3
+fi
+if [[ $npy_count -gt 0 ]]; then
+  echo "   Pseudo-label files (.npy format): ${npy_count}"
+  echo "   Sample .npy files:"
+  echo "$npy_files" | head -3
+fi
+echo ""
 echo "$pt_files" | head -3
 echo ""
 
@@ -144,14 +160,24 @@ if [[ ! -d "${PSEUDO_ROOT}/train" ]]; then
   exit 1
 fi
 
-pt_count=$(find "${PSEUDO_ROOT}/train" -name "*.pt" -type f | wc -l)
-if [[ $pt_count -eq 0 ]]; then
-  echo "❌ ERROR: No .pt files found in ${PSEUDO_ROOT}/train" >&2
+# Check for both .pt and .npy formats
+pt_count=$(find "${PSEUDO_ROOT}/train" -name "*.pt" -type f 2>/dev/null | wc -l)
+npy_count=$(find "${PSEUDO_ROOT}/train" -name "*_features.npy" -type f 2>/dev/null | wc -l)
+total_count=$((pt_count + npy_count))
+
+if [[ $total_count -eq 0 ]]; then
+  echo "❌ ERROR: No pseudo-label files found in ${PSEUDO_ROOT}/train" >&2
+  echo "   Expected either .pt or *_features.npy files." >&2
   echo "   Please check the export stage for errors." >&2
   exit 1
 fi
 
-echo "✅ Found ${pt_count} pseudo-label files in training set"
+if [[ $pt_count -gt 0 ]]; then
+  echo "✅ Found ${pt_count} pseudo-label files (.pt format) in training set"
+fi
+if [[ $npy_count -gt 0 ]]; then
+  echo "✅ Found ${npy_count} pseudo-label files (.npy format) in training set"
+fi
 echo ""
 
 python -m underwater_ir.student.train_student \

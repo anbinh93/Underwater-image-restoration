@@ -73,10 +73,10 @@ def load_pseudo_label(root: Path, rel_path: str) -> Dict[str, torch.Tensor]:
     probs_path = parent / f"{stem}_probs.npy"
     
     if features_path.exists() and masks_path.exists() and probs_path.exists():
-        # Load numpy arrays and convert to tensors
-        features = torch.from_numpy(np.load(features_path))
-        masks = torch.from_numpy(np.load(masks_path))
-        probs = torch.from_numpy(np.load(probs_path))
+        # Load numpy arrays and convert to tensors with consistent dtype (float32)
+        features = torch.from_numpy(np.load(features_path)).float()
+        masks = torch.from_numpy(np.load(masks_path)).float()
+        probs = torch.from_numpy(np.load(probs_path)).float()
         
         # Reconstruct pseudo-label dict in expected format
         # Assuming features is the z_d code
@@ -252,7 +252,7 @@ def main() -> None:
                 f"Expected either *.pt or *_features.npy files."
             )
         
-        # Load V2 format
+        # Load V2 format with consistent dtype (float32)
         stem = pseudo_example_path.stem.replace("_features", "")
         parent = pseudo_example_path.parent
         
@@ -265,9 +265,9 @@ def main() -> None:
                 f"Need: *_features.npy, *_masks.npy, *_probs.npy"
             )
         
-        features = torch.from_numpy(np.load(pseudo_example_path))
-        masks = torch.from_numpy(np.load(masks_path))
-        probs = torch.from_numpy(np.load(probs_path))
+        features = torch.from_numpy(np.load(pseudo_example_path)).float()
+        masks = torch.from_numpy(np.load(masks_path)).float()
+        probs = torch.from_numpy(np.load(probs_path)).float()
         
         pseudo_sample = {
             "z_d": features,
