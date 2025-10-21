@@ -221,7 +221,11 @@ def export_pseudolabels(
 
             canonical = {k.lower(): v for k, v in sample.items()}
 
-            image = canonical.get("lq") or canonical.get("input") or canonical.get("image")
+            image = None
+            for key in ("lq", "input", "image"):
+                if key in canonical:
+                    image = canonical[key]
+                    break
             if image is None:
                 print(f"Warning: Sample missing image tensor, keys={list(sample.keys())}")
                 continue
