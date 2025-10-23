@@ -430,13 +430,15 @@ def main() -> None:
         feat_weight = cfg.get("feat", feat_weight)
         ctr_weight = cfg.get("ctr", ctr_weight)
 
-    frequency_loss = FrequencyLoss(hf_weight, lf_weight)
-    region_loss = RegionLoss()
-    tv_loss = TotalVariationLoss(tv_weight)
-    perceptual_loss = PerceptualLoss(weight=perc_weight)
-    kd_loss = KLDivergenceLoss()
-    feat_align_loss = FeatureAlignmentLoss(weight=feat_weight)
-    contrastive_loss = ContrastiveInfoNCELoss(weight=ctr_weight)
+    frequency_loss = FrequencyLoss(hf_weight, lf_weight).to(device)
+    region_loss = RegionLoss().to(device)
+    tv_loss = TotalVariationLoss(tv_weight).to(device)
+    perceptual_loss = PerceptualLoss(weight=perc_weight).to(device)
+    kd_loss = KLDivergenceLoss().to(device)
+    feat_align_loss = FeatureAlignmentLoss(weight=feat_weight).to(device)
+    contrastive_loss = ContrastiveInfoNCELoss(weight=ctr_weight).to(device)
+
+    print_main(f"✅ All loss modules moved to device: {device}")
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
