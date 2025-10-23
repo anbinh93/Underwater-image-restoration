@@ -153,18 +153,20 @@ def compute_degradation_masks(
     # Compute probabilities
     probs = torch.softmax(logits / temperature, dim=-1)
     
-    # Simple thresholding for masks
-    masks = (probs > threshold).float()
+    # Use probability directly as mask weights (not binary threshold!)
+    # This way masks contain the actual probability values, not just 0/1
+    # Binary thresholding with threshold=0.5 was causing all-zero masks
     
-    # Expand to spatial dimensions (placeholder - actual implementation may vary)
-    B, N = masks.shape
+    # Expand to spatial dimensions
+    B, N = probs.shape
     H, W = 224, 224  # Standard CLIP size
     
     if images is not None:
         H, W = images.shape[2], images.shape[3]
     
-    # Expand masks to spatial dimensions
-    spatial_masks = masks.unsqueeze(-1).unsqueeze(-1).expand(B, N, H, W)
+    # Expand probability masks to spatial dimensions
+    # Shape: (B, N, H, W) where values are probabilities in [0, 1]
+    spatial_masks = probs.unsqueeze(-1).unsqueeze(-1).expand(B, N, H, W)
     
     # TODO: Implement CRF refinement if use_crf is True
     if use_crf and crf_params is not None:
