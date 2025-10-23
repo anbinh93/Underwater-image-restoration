@@ -116,11 +116,19 @@ class SigLIP2PseudoLabelExtractor:
         spatial_weight = 1.0 - intensity.squeeze(0)  # (1, H, W)
         masks = masks * (0.5 + 0.5 * spatial_weight)  # Soft modulation
         
-        # Ensure masks are properly normalized per channel
+        # CRITICAL: Normalize masks to [0, 1] range to prevent NaN in training
+        # Each channel should be a probability map
         for c in range(C):
             mask_c = masks[c]
-            if mask_c.max() > 0:
-                masks[c] = mask_c / (mask_c.sum() + 1e-8) * (H * W)
+            if mask_c.max() > mask_c.min():
+                # Min-max normalization to [0, 1]
+                masks[c] = (mask_c - mask_c.min()) / (mask_c.max() - mask_c.min() + 1e-8)
+            else:
+                # If constant, just clip
+                masks[c] = torch.clamp(mask_c, 0, 1)
+        
+        # Final safety clamp to ensure strictly in [0, 1]
+        masks = torch.clamp(masks, 0, 1)
         
         return masks
 
@@ -180,6 +188,12 @@ def export_pseudo_labels(
                 error_count += 1
                 continue
             
+            # Validate masks are in valid range [0, 1]
+            if masks.min() < 0 or masks.max() > 1.0:
+                print(f"⚠️  Warning: {img_path.name} masks out of range [0,1]: min={masks.min():.4f}, max={masks.max():.4f}")
+                # Clip to valid range
+                masks = np.clip(masks, 0, 1)
+            
             # Save as .npy files
             stem = img_path.stem
             np.save(output_root / f"{stem}_features.npy", features)
@@ -205,15 +219,31 @@ def export_pseudo_labels(
     # Validate a few samples
     print("Validating samples...")
     sample_masks = list(output_root.glob("*_masks.npy"))[:3]
+    all_valid = True
     for mask_path in sample_masks:
         masks = np.load(mask_path)
+        is_valid = (masks.min() >= 0 and masks.max() <= 1.0 and masks.max() > 0)
+        status = "✅ OK" if is_valid else "❌ INVALID"
         print(f"  {mask_path.name}")
         print(f"    Shape: {masks.shape}")
-        print(f"    Min/Max/Mean: {masks.min():.4f} / {masks.max():.4f} / {masks.mean():.4f}")
-        if masks.max() == 0:
-            print(f"    ❌ WARNING: Still zero masks!")
-        else:
-            print(f"    ✅ OK")
+        print(f"    Range: [{masks.min():.6f}, {masks.max():.6f}], Mean: {masks.mean():.6f}")
+        print(f"    Status: {status}")
+        if not is_valid:
+            all_valid = False
+            if masks.max() == 0:
+                print(f"      Issue: All zeros!")
+            elif masks.max() > 1.0:
+                print(f"      Issue: Values exceed 1.0!")
+            elif masks.min() < 0:
+                print(f"      Issue: Negative values!")
+    
+    if not all_valid:
+        print()
+        print("⚠️  WARNING: Some masks failed validation!")
+        print("   Please check the export script for bugs.")
+    else:
+        print()
+        print("✅ All sample masks are valid!")
 
 
 def main():

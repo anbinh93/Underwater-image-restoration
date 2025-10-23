@@ -513,10 +513,15 @@ def main() -> None:
             if masks.abs().max() < 1e-6:
                 print(f"[Rank {get_rank()}] WARNING: Masks are nearly zero (max={masks.abs().max().item():.2e}). Skipping batch.")
                 continue
+            
+            # CRITICAL: Normalize masks to prevent overflow
+            # SigLIP v2 may produce masks > 1.0, which can cause NaN
+            masks = masks / (masks.max() + 1e-8)  # Normalize to [0, 1]
+            masks = torch.clamp(masks, 0, 1)  # Ensure strictly in valid range
 
             # Debug: print input stats on first batch
             if is_main_process() and not hasattr(main, '_debug_printed'):
-                print(f"\n[DEBUG] Input statistics:")
+                print(f"\n[DEBUG] Input statistics (after normalization):")
                 print(f"  LQ: min={lq.min().item():.4f}, max={lq.max().item():.4f}, mean={lq.mean().item():.4f}")
                 print(f"  GT: min={gt.min().item():.4f}, max={gt.max().item():.4f}, mean={gt.mean().item():.4f}")
                 print(f"  z_d: min={z_d.min().item():.4f}, max={z_d.max().item():.4f}, mean={z_d.mean().item():.4f}")
@@ -627,7 +632,18 @@ def main() -> None:
 
             optimizer.zero_grad()
             total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            
+            # Check for NaN/Inf in gradients
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                if is_main_process():
+                    print(f"\n[Rank {get_rank()}] ⚠️  NaN/Inf gradient detected! grad_norm={grad_norm}")
+                    print(f"  Skipping optimizer step for this batch")
+                    print(f"  This may indicate numerical instability in the model\n")
+                optimizer.zero_grad()  # Clear bad gradients
+                continue
+            
             optimizer.step()
 
             running_loss += total_loss.item()
