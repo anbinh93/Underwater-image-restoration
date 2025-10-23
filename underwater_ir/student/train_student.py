@@ -506,13 +506,6 @@ def main() -> None:
             if alpha_maps:
                 student_feat = alpha_maps[-1]
                 teacher_feat = masks_resized.mean(dim=1, keepdim=True)
-                
-                # Resize student_feat to match teacher_feat if dimensions differ
-                if student_feat.shape[-2:] != teacher_feat.shape[-2:]:
-                    student_feat = F.interpolate(
-                        student_feat, size=teacher_feat.shape[-2:], mode='bilinear', align_corners=False
-                    )
-                
                 total_loss = total_loss + feat_align_loss(student_feat, teacher_feat)
 
             if all("text_embeddings" in item for item in pseudo):
