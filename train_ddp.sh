@@ -2,12 +2,13 @@
 set -euo pipefail
 
 # Distributed training wrapper script for 4 GPUs
-# Usage: bash train_ddp.sh [num_gpus] [batch_size_per_gpu]
+# Usage: bash train_ddp.sh [num_gpus] [batch_size_per_gpu] [epochs] [img_size] [attn_chunk_size]
 
 NUM_GPUS="${1:-4}"
-BATCH_SIZE="${2:-4}"
+BATCH_SIZE="${2:-2}"
 EPOCHS="${3:-20}"
-IMG_SIZE="${4:-256}"
+IMG_SIZE="${4:-128}"
+ATTN_CHUNK="${5:-128}"  # Lower chunk size = less memory but slower
 
 TRAIN_ROOT="Dataset/train"
 VAL_REF_ROOT="Dataset/testset(ref)"
@@ -24,6 +25,7 @@ echo "  Batch size per GPU: ${BATCH_SIZE}"
 echo "  Total batch size: $((NUM_GPUS * BATCH_SIZE))"
 echo "  Epochs: ${EPOCHS}"
 echo "  Image size: ${IMG_SIZE}x${IMG_SIZE}"
+echo "  Attention chunk size: ${ATTN_CHUNK} (lower=less memory)"
 echo "  Workers per GPU: ${WORKERS}"
 echo "================================================================================"
 echo ""
@@ -75,6 +77,7 @@ torchrun \
   --batch-size "${BATCH_SIZE}" \
   --num-workers "${WORKERS}" \
   --img-size "${IMG_SIZE}" \
+  --attn-chunk-size "${ATTN_CHUNK}" \
   --save-path "${SAVE_PATH}" \
   --ddp
 

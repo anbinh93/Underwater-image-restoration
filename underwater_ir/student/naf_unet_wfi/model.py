@@ -15,9 +15,9 @@ from .wtb import WideTransformerBlock
 
 
 class WFIBlock(nn.Module):
-    def __init__(self, channels: int, cond_dim: int, num_masks: int, num_heads: int = 4) -> None:
+    def __init__(self, channels: int, cond_dim: int, num_masks: int, num_heads: int = 4, attn_chunk_size: int = 256) -> None:
         super().__init__()
-        self.hf_block = WideTransformerBlock(channels * 3, cond_dim, num_heads=max(1, num_heads * 3))
+        self.hf_block = WideTransformerBlock(channels * 3, cond_dim, num_heads=max(1, num_heads * 3), attn_chunk_size=attn_chunk_size)
         self.lf_block = SpatialFrequencyFusionBlock(channels, cond_dim)
         self.cfc = CrossFrequencyConditioner(channels, num_heads)
         self.gate = WFIGate(channels, cond_dim, num_masks)
@@ -42,10 +42,10 @@ class WFIBlock(nn.Module):
 
 
 class WFIStage(nn.Module):
-    def __init__(self, channels: int, cond_dim: int, num_masks: int, num_blocks: int) -> None:
+    def __init__(self, channels: int, cond_dim: int, num_masks: int, num_blocks: int, attn_chunk_size: int = 256) -> None:
         super().__init__()
         self.blocks = nn.ModuleList(
-            [WFIBlock(channels, cond_dim, num_masks) for _ in range(num_blocks)]
+            [WFIBlock(channels, cond_dim, num_masks, attn_chunk_size=attn_chunk_size) for _ in range(num_blocks)]
         )
 
     def forward(
@@ -72,6 +72,7 @@ class NAFNetWFIGate(nn.Module):
         cond_dim: int = 16,
         num_masks: int = 0,
         num_degradation_types: Optional[int] = None,
+        attn_chunk_size: int = 256,
     ) -> None:
         super().__init__()
         self.cond_dim = cond_dim
@@ -85,7 +86,7 @@ class NAFNetWFIGate(nn.Module):
 
         self.encoder_stages = nn.ModuleList(
             [
-                WFIStage(channels[i], cond_dim, num_masks, blocks_per_level)
+                WFIStage(channels[i], cond_dim, num_masks, blocks_per_level, attn_chunk_size=attn_chunk_size)
                 for i in range(num_levels)
             ]
         )
@@ -110,7 +111,7 @@ class NAFNetWFIGate(nn.Module):
         )
         self.decoder_stages = nn.ModuleList(
             [
-                WFIStage(channels[i], cond_dim, num_masks, blocks_per_level)
+                WFIStage(channels[i], cond_dim, num_masks, blocks_per_level, attn_chunk_size=attn_chunk_size)
                 for i in reversed(range(num_levels - 1))
             ]
         )

@@ -255,6 +255,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-batch-size", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--img-size", type=int, default=256, help="Input image size (all images will be resized to this)")
+    parser.add_argument("--attn-chunk-size", type=int, default=256, help="Chunk size for memory-efficient attention (lower=less memory)")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--loss-config", type=str, default=None, help="Optional JSON overriding loss weights.")
     parser.add_argument("--save-path", type=str, default="student_model.pt")
@@ -385,7 +386,10 @@ def main() -> None:
         cond_dim=cond_dim,
         num_masks=num_masks,
         num_degradation_types=num_degradation_types,
+        attn_chunk_size=args.attn_chunk_size,
     ).to(device)
+    
+    print_main(f"✅ Model initialized with attn_chunk_size={args.attn_chunk_size} (lower=less memory)")
     
     # Wrap model with DDP if enabled
     if args.ddp:
