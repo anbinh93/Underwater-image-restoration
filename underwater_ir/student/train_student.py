@@ -502,6 +502,7 @@ def main() -> None:
         else:
             pbar = train_loader
         
+        batch_counter = 0
         for batch in pbar:
             lq = batch["LQ"].to(device)
             gt = batch["GT"].to(device)
@@ -605,6 +606,17 @@ def main() -> None:
             # Calculate metrics (SSIM and PSNR on output vs GT)
             batch_ssim = ssim_value(output.detach(), gt)
             batch_psnr = psnr_value(output.detach(), gt)
+            
+            # Debug: verify output != gt (only first batch of first epoch)
+            if epoch == 0 and batch_counter == 0 and is_main_process():
+                print(f"\n🔍 SSIM Debug (first batch):")
+                print(f"   Output stats: min={output.min():.4f}, max={output.max():.4f}, mean={output.mean():.4f}")
+                print(f"   GT stats:     min={gt.min():.4f}, max={gt.max():.4f}, mean={gt.mean():.4f}")
+                print(f"   Diff:         min={(output-gt).abs().min():.4f}, max={(output-gt).abs().max():.4f}, mean={(output-gt).abs().mean():.4f}")
+                print(f"   SSIM value:   {batch_ssim:.6f}")
+                print(f"   PSNR value:   {batch_psnr:.2f} dB\n")
+            
+            batch_counter += 1
             
             # Track metrics
             running_loss += total_loss.item()
