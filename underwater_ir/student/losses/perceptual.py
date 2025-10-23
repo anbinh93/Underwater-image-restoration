@@ -45,7 +45,16 @@ class VGGFeatureExtractor(nn.Module):
             param.requires_grad = False
 
     def forward(self, x: torch.Tensor) -> Iterable[torch.Tensor]:
-        x = (x - self.mean) / self.std
+        # Debug: print shapes if mismatch occurs
+        try:
+            x = (x - self.mean) / self.std
+        except RuntimeError as e:
+            print(f"❌ Shape mismatch in VGGFeatureExtractor:")
+            print(f"   Input x shape: {x.shape}, device: {x.device}")
+            print(f"   self.mean shape: {self.mean.shape}, device: {self.mean.device}")
+            print(f"   self.std shape: {self.std.shape}, device: {self.std.device}")
+            raise e
+        
         feats = []
         for idx, layer in enumerate(self.features):
             x = layer(x)

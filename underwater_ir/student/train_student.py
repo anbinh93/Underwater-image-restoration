@@ -472,12 +472,18 @@ def main() -> None:
             total_loss = total_loss + ssim_weight * ssim_loss(output, gt)
             total_loss = total_loss + perceptual_loss(output, gt)
 
-            hf_mask = masks[:, :1, :, :]
-            lf_mask = masks[:, -1:, :, :]
+            # Resize masks to match output/gt dimensions if needed
+            if masks.shape[-2:] != output.shape[-2:]:
+                masks_resized = F.interpolate(masks, size=output.shape[-2:], mode='nearest')
+            else:
+                masks_resized = masks
+            
+            hf_mask = masks_resized[:, :1, :, :]
+            lf_mask = masks_resized[:, -1:, :, :]
             hf_term, lf_term = frequency_loss(output, gt, hf_mask=hf_mask, lf_mask=lf_mask)
             total_loss = total_loss + hf_term + lf_term
 
-            region_term = region_loss(output, gt, masks=masks)
+            region_term = region_loss(output, gt, masks=masks_resized)
             total_loss = total_loss + region_weight * region_term
 
             total_loss = total_loss + tv_loss(output)
