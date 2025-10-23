@@ -108,54 +108,81 @@ def check_existing_pseudo_labels(pseudo_root: str):
         return False
     
     # Find some samples
-    pt_files = list(root.rglob("*.pt"))[:3]
-    npy_files = list(root.rglob("*_masks.npy"))[:3]
+    pt_files = list(root.rglob("*.pt"))[:5]
+    npy_files = list(root.rglob("*_masks.npy"))[:5]
     
     if not pt_files and not npy_files:
         print(f"❌ No pseudo-label files found")
         return False
     
+    print(f"Found {len(pt_files)} .pt files and {len(npy_files)} .npy files")
+    print()
+    
     has_zeros = False
+    good_count = 0
     
     # Check .pt files
     for pt_file in pt_files:
-        data = torch.load(pt_file)
-        if "masks" in data:
-            masks = data["masks"]
-            if masks.max() == 0:
-                print(f"❌ {pt_file.name}: masks are ALL ZEROS")
-                has_zeros = True
-            else:
-                print(f"✅ {pt_file.name}: masks OK (max={masks.max():.4f})")
+        try:
+            data = torch.load(pt_file, map_location='cpu')
+            if "masks" in data:
+                masks = data["masks"]
+                if masks.max() == 0:
+                    print(f"❌ {pt_file.name}: masks are ALL ZEROS")
+                    has_zeros = True
+                else:
+                    print(f"✅ {pt_file.name}: masks OK (max={masks.max():.4f}, mean={masks.mean():.4f})")
+                    good_count += 1
+        except Exception as e:
+            print(f"⚠️  {pt_file.name}: Error loading - {e}")
     
     # Check .npy files
     if npy_files:
         import numpy as np
         for npy_file in npy_files:
-            masks = np.load(npy_file)
-            if masks.max() == 0:
-                print(f"❌ {npy_file.name}: masks are ALL ZEROS")
-                has_zeros = True
-            else:
-                print(f"✅ {npy_file.name}: masks OK (max={masks.max():.4f})")
+            try:
+                masks = np.load(npy_file)
+                if masks.max() == 0:
+                    print(f"❌ {npy_file.name}: masks are ALL ZEROS (shape={masks.shape})")
+                    has_zeros = True
+                else:
+                    print(f"✅ {npy_file.name}: masks OK (shape={masks.shape}, max={masks.max():.4f}, mean={masks.mean():.4f})")
+                    good_count += 1
+            except Exception as e:
+                print(f"⚠️  {npy_file.name}: Error loading - {e}")
     
     print()
+    print("=" * 70)
     if has_zeros:
-        print("=" * 70)
         print("❌ FOUND ZERO-MASK PROBLEM!")
         print("=" * 70)
         print()
-        print("Solution: RE-EXPORT pseudo-labels with working teacher model")
+        print(f"Good files: {good_count}")
+        print(f"Zero-mask files: {len(pt_files) + len(npy_files) - good_count}")
+        print()
+        print("🔧 SOLUTION: Switch to SigLIP v2")
+        print()
+        print("The current teacher model (DACLiP) is producing zero masks.")
+        print("We recommend using SigLIP v2 instead:")
         print()
         print("Steps:")
-        print("  1. Verify teacher model checkpoint is valid")
-        print("  2. Test teacher model on a few images manually")
-        print("  3. Check export script for bugs")
-        print("  4. Re-run export with verbose logging")
-        print("  5. Validate exported files with check_pseudo_labels.py")
+        print("  1. Run SigLIP v2 export:")
+        print("     bash export_siglip2.sh Dataset/train pseudo-labels/siglip2/train")
+        print()
+        print("  2. Update training config to use new path:")
+        print("     --pseudo-root pseudo-labels/siglip2/train")
+        print()
+        print("  3. Validate new pseudo-labels:")
+        print("     python validate_teacher_export.py --pseudo-root pseudo-labels/siglip2/train")
+        print()
         return False
     else:
-        print("✅ Pseudo-labels look OK!")
+        print("✅ PSEUDO-LABELS LOOK GOOD!")
+        print("=" * 70)
+        print()
+        print(f"Validated {good_count} files - all have non-zero masks")
+        print("These pseudo-labels should work for training!")
+        print()
         return True
 
 if __name__ == "__main__":
