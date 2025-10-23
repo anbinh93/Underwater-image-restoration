@@ -74,9 +74,13 @@ def ssim_loss(x: torch.Tensor, y: torch.Tensor, window_size: int = 11, c1: float
     sigma_y = F.avg_pool2d(y * y, window_size, stride=1, padding=window_size // 2) - mu_y**2
     sigma_xy = F.avg_pool2d(x * y, window_size, stride=1, padding=window_size // 2) - mu_x * mu_y
 
+    # Clamp variance to avoid negative values due to numerical errors
+    sigma_x = sigma_x.clamp(min=0)
+    sigma_y = sigma_y.clamp(min=0)
+
     numerator = (2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)
     denominator = (mu_x**2 + mu_y**2 + c1) * (sigma_x + sigma_y + c2)
-    ssim_map = numerator / (denominator + 1e-6)
+    ssim_map = numerator / (denominator + 1e-8)  # Increased epsilon for safety
     return (1 - ssim_map).mean()
 
 
