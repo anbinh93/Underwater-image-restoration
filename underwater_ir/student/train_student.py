@@ -465,7 +465,23 @@ def main() -> None:
                 [item.get("confidence_scale", torch.ones_like(item["global_prob"])) for item in pseudo], dim=0
             )
 
+            # Check for NaN in inputs
+            if torch.isnan(lq).any():
+                print(f"[Rank {get_rank()}] WARNING: NaN detected in input LQ!")
+                continue
+            if torch.isnan(gt).any():
+                print(f"[Rank {get_rank()}] WARNING: NaN detected in ground truth!")
+                continue
+            if torch.isnan(masks).any() or torch.isnan(z_d).any():
+                print(f"[Rank {get_rank()}] WARNING: NaN detected in pseudo-labels!")
+                continue
+
             output, alpha_maps, student_logits = model(lq, z_d, masks=masks)
+
+            # Check for NaN in output
+            if torch.isnan(output).any():
+                print(f"[Rank {get_rank()}] WARNING: NaN in model output! Skipping batch.")
+                continue
 
             total_loss = lq.new_tensor(0.0)
             total_loss = total_loss + l1_weight * charbonnier_loss(output, gt)
@@ -511,6 +527,12 @@ def main() -> None:
                 text_embed = torch.stack([item["text_embeddings"] for item in pseudo], dim=0).to(device)
                 positive_index = torch.arange(image_embed.shape[0], device=device)
                 total_loss = total_loss + contrastive_loss(image_embed, text_embed, positive_index)
+
+            # Check for NaN in total loss before backward
+            if torch.isnan(total_loss) or torch.isinf(total_loss):
+                print(f"[Rank {get_rank()}] WARNING: NaN/Inf in total_loss! Skipping batch.")
+                print(f"   Loss value: {total_loss.item()}")
+                continue
 
             optimizer.zero_grad()
             total_loss.backward()
