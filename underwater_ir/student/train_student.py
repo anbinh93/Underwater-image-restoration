@@ -483,7 +483,10 @@ def main() -> None:
             hf_term, lf_term = frequency_loss(output, gt, hf_mask=hf_mask, lf_mask=lf_mask)
             total_loss = total_loss + hf_term + lf_term
 
-            region_term = region_loss(output, gt, masks=masks_resized)
+            # Split masks along channel dimension for RegionLoss
+            # RegionLoss expects iterable of individual mask channels
+            mask_list = [masks_resized[:, i:i+1, :, :] for i in range(masks_resized.shape[1])]
+            region_term = region_loss(output, gt, masks=mask_list)
             total_loss = total_loss + region_weight * region_term
 
             total_loss = total_loss + tv_loss(output)
