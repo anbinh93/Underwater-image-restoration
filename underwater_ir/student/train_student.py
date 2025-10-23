@@ -496,7 +496,7 @@ def main() -> None:
 
             if alpha_maps:
                 student_feat = alpha_maps[-1]
-                teacher_feat = masks.mean(dim=1, keepdim=True)
+                teacher_feat = masks_resized.mean(dim=1, keepdim=True)
                 total_loss = total_loss + feat_align_loss(student_feat, teacher_feat)
 
             if all("text_embeddings" in item for item in pseudo):
