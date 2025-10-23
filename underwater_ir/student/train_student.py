@@ -491,7 +491,7 @@ def main() -> None:
         
         model.train()
         running_loss = 0.0
-        epoch_metrics = {'loss': 0.0, 'l1': 0.0, 'ssim': 0.0, 'perc': 0.0, 'freq': 0.0}
+        epoch_metrics = {'loss': 0.0, 'l1': 0.0, 'ssim': 0.0, 'psnr': 0.0, 'perc': 0.0, 'freq': 0.0}
         num_batches = 0
         
         # Progress bar (only on main process)
@@ -602,11 +602,16 @@ def main() -> None:
             
             optimizer.step()
 
+            # Calculate metrics (SSIM and PSNR on output vs GT)
+            batch_ssim = ssim_value(output.detach(), gt)
+            batch_psnr = psnr_value(output.detach(), gt)
+            
             # Track metrics
             running_loss += total_loss.item()
             epoch_metrics['loss'] += total_loss.item()
             epoch_metrics['l1'] += l1_loss_val.item()
-            epoch_metrics['ssim'] += ssim_loss_val.item()
+            epoch_metrics['ssim'] += batch_ssim
+            epoch_metrics['psnr'] += batch_psnr
             epoch_metrics['perc'] += perc_loss_val.item()
             epoch_metrics['freq'] += freq_loss_val.item()
             num_batches += 1
@@ -615,8 +620,8 @@ def main() -> None:
             if is_main_process():
                 pbar.set_postfix({
                     'loss': f'{total_loss.item():.4f}',
-                    'l1': f'{l1_loss_val.item():.3f}',
-                    'ssim': f'{ssim_loss_val.item():.3f}'
+                    'psnr': f'{batch_psnr:.2f}',
+                    'ssim': f'{batch_ssim:.3f}'
                 })
 
         # Synchronize loss across all processes for DDP
@@ -643,9 +648,12 @@ def main() -> None:
             print(f"{'='*80}")
             print(f"  Total Loss:      {avg_loss:.4f}")
             print(f"  L1 Loss:         {epoch_metrics['l1']:.4f}")
-            print(f"  SSIM Loss:       {epoch_metrics['ssim']:.4f}")
             print(f"  Perceptual Loss: {epoch_metrics['perc']:.4f}")
             print(f"  Frequency Loss:  {epoch_metrics['freq']:.4f}")
+            print(f"  {'─'*76}")
+            print(f"  📊 PSNR:          {epoch_metrics['psnr']:.2f} dB  (↑ higher is better)")
+            print(f"  📊 SSIM:          {epoch_metrics['ssim']:.4f}     (↑ higher is better)")
+            print(f"  {'─'*76}")
             print(f"  Batches:         {num_batches}")
             
             # Evaluation
