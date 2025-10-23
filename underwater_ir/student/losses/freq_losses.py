@@ -34,6 +34,12 @@ class FrequencyLoss(nn.Module):
         pred_ll, pred_lh, pred_hl, pred_hh = dwt2(pred)
         tgt_ll, tgt_lh, tgt_hl, tgt_hh = dwt2(target)
 
+        # Resize hf_mask to match wavelet component dimensions (half of input size)
+        if hf_mask is not None and hf_mask.shape[-2:] != pred_lh.shape[-2:]:
+            hf_mask = torch.nn.functional.interpolate(
+                hf_mask, size=pred_lh.shape[-2:], mode='nearest'
+            )
+
         hf_loss = (
             _masked_l1(pred_lh - tgt_lh, hf_mask)
             + _masked_l1(pred_hl - tgt_hl, hf_mask)
@@ -42,6 +48,13 @@ class FrequencyLoss(nn.Module):
 
         amp_pred, _ = fft2(pred_ll)
         amp_tgt, _ = fft2(tgt_ll)
+        
+        # Resize lf_mask to match low-frequency component dimensions
+        if lf_mask is not None and lf_mask.shape[-2:] != amp_pred.shape[-2:]:
+            lf_mask = torch.nn.functional.interpolate(
+                lf_mask, size=amp_pred.shape[-2:], mode='nearest'
+            )
+        
         lf_loss = _masked_l1(amp_pred - amp_tgt, lf_mask)
 
         return self.lambda_hf * hf_loss, self.lambda_lf * lf_loss
