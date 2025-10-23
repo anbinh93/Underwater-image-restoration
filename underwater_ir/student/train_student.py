@@ -206,11 +206,29 @@ def evaluate_reference(
                 z_d = torch.stack([item["z_d"] for item in pseudo], dim=0)
                 output, _, _ = model(lq, z_d, masks=masks)
                 for pred_img, gt_img in zip(output, gt):
-                    psnr_sum += psnr_value(pred_img.clamp(0, 1), gt_img.clamp(0, 1))
-                    ssim_sum += ssim_value(pred_img.clamp(0, 1).unsqueeze(0), gt_img.clamp(0, 1).unsqueeze(0))
+                    pred_clamped = pred_img.clamp(0, 1)
+                    gt_clamped = gt_img.clamp(0, 1)
+                    
+                    # Debug: Check if output is identical to GT
+                    if count == 0:  # First sample only
+                        mse = torch.mean((pred_clamped - gt_clamped) ** 2).item()
+                        if mse < 1e-6:
+                            print(f"[eval][ref] WARNING: {entry.name} - output≈GT (MSE={mse:.2e})")
+                            print(f"  pred range: [{pred_clamped.min():.4f}, {pred_clamped.max():.4f}]")
+                            print(f"  gt range: [{gt_clamped.min():.4f}, {gt_clamped.max():.4f}]")
+                    
+                    psnr_sum += psnr_value(pred_clamped, gt_clamped)
+                    ssim_sum += ssim_value(pred_clamped.unsqueeze(0), gt_clamped.unsqueeze(0))
                     count += 1
             if count > 0:
-                results[entry.name] = {"psnr": psnr_sum / count, "ssim": ssim_sum / count}
+                avg_psnr = psnr_sum / count
+                avg_ssim = ssim_sum / count
+                results[entry.name] = {"psnr": avg_psnr, "ssim": avg_ssim}
+                
+                # Warn if metrics are suspicious
+                if avg_ssim > 0.999:
+                    print(f"[eval][ref] ⚠️  {entry.name}: SSIM={avg_ssim:.4f} (suspiciously high!)")
+                    print(f"  This may indicate model is not learning or output≈input")
     return results
 
 
