@@ -402,6 +402,26 @@ def main() -> None:
         attn_chunk_size=args.attn_chunk_size,
     ).to(device)
     
+    # Initialize weights properly to avoid NaN
+    def init_weights(m):
+        if isinstance(m, (torch.nn.Conv2d, torch.nn.Linear)):
+            torch.nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias, 0)
+        elif isinstance(m, (torch.nn.BatchNorm2d, torch.nn.GroupNorm, torch.nn.LayerNorm)):
+            if m.weight is not None:
+                torch.nn.init.constant_(m.weight, 1)
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias, 0)
+    
+    model.apply(init_weights)
+    print_main(f"✅ Model weights initialized with Kaiming normal")
+    
+    # Check for NaN in initial weights
+    nan_params_init = [name for name, param in model.named_parameters() if torch.isnan(param).any()]
+    if nan_params_init:
+        raise RuntimeError(f"NaN detected in initial model parameters: {nan_params_init}")
+    
     print_main(f"✅ Model initialized with attn_chunk_size={args.attn_chunk_size} (lower=less memory)")
     
     # Wrap model with DDP if enabled
@@ -480,12 +500,41 @@ def main() -> None:
                 print(f"[Rank {get_rank()}] WARNING: NaN detected in pseudo-labels!")
                 continue
 
+            # Debug: print input stats on first batch
+            if is_main_process() and not hasattr(main, '_debug_printed'):
+                print(f"\n[DEBUG] Input statistics:")
+                print(f"  LQ: min={lq.min().item():.4f}, max={lq.max().item():.4f}, mean={lq.mean().item():.4f}")
+                print(f"  GT: min={gt.min().item():.4f}, max={gt.max().item():.4f}, mean={gt.mean().item():.4f}")
+                print(f"  z_d: min={z_d.min().item():.4f}, max={z_d.max().item():.4f}, mean={z_d.mean().item():.4f}")
+                print(f"  masks: min={masks.min().item():.4f}, max={masks.max().item():.4f}, mean={masks.mean().item():.4f}")
+                main._debug_printed = True
+
             output, alpha_maps, student_logits = model(lq, z_d, masks=masks)
 
-            # Check for NaN in output
+            # Check for NaN in output with detailed info
             if torch.isnan(output).any():
-                print(f"[Rank {get_rank()}] WARNING: NaN in model output! Skipping batch.")
-                continue
+                if is_main_process():
+                    print(f"\n[Rank {get_rank()}] ❌ NaN in model output detected!")
+                    print(f"  Output shape: {output.shape}")
+                    print(f"  NaN count: {torch.isnan(output).sum().item()} / {output.numel()}")
+                    print(f"  Output stats: min={output[~torch.isnan(output)].min().item() if not torch.isnan(output).all() else 'all NaN'}")
+                    
+                    # Check model parameters for NaN
+                    nan_params = []
+                    for name, param in model.named_parameters():
+                        if torch.isnan(param).any():
+                            nan_params.append(name)
+                    
+                    if nan_params:
+                        print(f"  ⚠️  NaN found in model parameters: {nan_params[:5]}...")
+                    else:
+                        print(f"  ℹ️  Model parameters are OK (no NaN)")
+                    
+                    print(f"  This suggests model forward pass is producing NaN")
+                    print(f"  Stopping training - need to fix model architecture or initialization\n")
+                
+                # Stop training completely if all batches are NaN
+                raise RuntimeError("Model is producing NaN outputs - training cannot continue")
 
             total_loss = lq.new_tensor(0.0)
             total_loss = total_loss + l1_weight * charbonnier_loss(output, gt)
