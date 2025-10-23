@@ -484,6 +484,9 @@ def main() -> None:
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
+    # Track metrics history for progress monitoring
+    metrics_history = []
+
     for epoch in range(args.epochs):
         # Set epoch for DistributedSampler
         if args.ddp and train_sampler is not None:
@@ -667,6 +670,25 @@ def main() -> None:
             print(f"  📊 SSIM:          {epoch_metrics['ssim']:.4f}     (↑ higher is better)")
             print(f"  {'─'*76}")
             print(f"  Batches:         {num_batches}")
+            
+            # Save metrics to history
+            metrics_history.append({
+                'epoch': epoch + 1,
+                'loss': avg_loss,
+                'psnr': epoch_metrics['psnr'],
+                'ssim': epoch_metrics['ssim']
+            })
+            
+            # Show progress comparison (from epoch 1)
+            if epoch > 0:
+                first = metrics_history[0]
+                current = metrics_history[-1]
+                psnr_change = current['psnr'] - first['psnr']
+                ssim_change = current['ssim'] - first['ssim']
+                print(f"  {'─'*76}")
+                print(f"  📈 Progress from Epoch 1:")
+                print(f"     PSNR: {first['psnr']:.2f} → {current['psnr']:.2f} dB  ({psnr_change:+.2f} dB)")
+                print(f"     SSIM: {first['ssim']:.4f} → {current['ssim']:.4f}  ({ssim_change:+.4f})")
             
             # Evaluation
             if ref_entries:
