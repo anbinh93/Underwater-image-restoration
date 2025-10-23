@@ -99,9 +99,19 @@ TEST_DATASETS=(
 )
 
 for test_set in "${TEST_DATASETS[@]}"; do
+    # Try multiple possible locations
+    test_path=""
     if [ -d "$DATA_BASE/$test_set" ]; then
+        test_path="$DATA_BASE/$test_set"
+    elif [ -d "$DATA_BASE/testset(non-ref)/$test_set" ]; then
+        test_path="$DATA_BASE/testset(non-ref)/$test_set"
+    elif [ -d "$DATA_BASE/testset_nonref/$test_set" ]; then
+        test_path="$DATA_BASE/testset_nonref/$test_set"
+    fi
+    
+    if [ -n "$test_path" ]; then
         TOTAL=$((TOTAL + 1))
-        export_dataset "$DATA_BASE/$test_set" "$OUTPUT_BASE/testset_nonref/$test_set" "Test Set: $test_set"
+        export_dataset "$test_path" "$OUTPUT_BASE/testset_nonref/$test_set" "Test Set: $test_set"
         [ $? -eq 0 ] && SUCCESS=$((SUCCESS + 1)) || FAILED=$((FAILED + 1))
     fi
 done
@@ -116,9 +126,19 @@ PAIRED_TEST_DATASETS=(
 )
 
 for test_set in "${PAIRED_TEST_DATASETS[@]}"; do
+    # Try multiple possible locations
+    test_path=""
     if [ -d "$DATA_BASE/$test_set" ]; then
+        test_path="$DATA_BASE/$test_set"
+    elif [ -d "$DATA_BASE/testset(ref)/$test_set" ]; then
+        test_path="$DATA_BASE/testset(ref)/$test_set"
+    elif [ -d "$DATA_BASE/testset_ref/$test_set" ]; then
+        test_path="$DATA_BASE/testset_ref/$test_set"
+    fi
+    
+    if [ -n "$test_path" ]; then
         TOTAL=$((TOTAL + 1))
-        export_dataset "$DATA_BASE/$test_set" "$OUTPUT_BASE/testset_ref/$test_set" "Paired Test Set: $test_set"
+        export_dataset "$test_path" "$OUTPUT_BASE/testset_ref/$test_set" "Paired Test Set: $test_set"
         [ $? -eq 0 ] && SUCCESS=$((SUCCESS + 1)) || FAILED=$((FAILED + 1))
     fi
 done

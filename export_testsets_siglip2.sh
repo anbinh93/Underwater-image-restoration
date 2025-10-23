@@ -26,19 +26,36 @@ SUCCESS=0
 TOTAL=0
 
 for test_set in "${TEST_SETS[@]}"; do
-    data_path="$DATA_BASE/$test_set"
-    output_path="$OUTPUT_BASE/$test_set"
+    # Try multiple possible locations
+    data_path=""
     
-    if [ ! -d "$data_path" ]; then
-        echo "⚠️  Skipping $test_set: not found at $data_path"
+    # Option 1: Direct under Dataset/ (e.g., Dataset/test-EUVP-unpaired/)
+    if [ -d "$DATA_BASE/$test_set" ]; then
+        data_path="$DATA_BASE/$test_set"
+    # Option 2: Under testset(non-ref)/ (e.g., Dataset/testset(non-ref)/test-EUVP-unpaired/)
+    elif [ -d "$DATA_BASE/testset(non-ref)/$test_set" ]; then
+        data_path="$DATA_BASE/testset(non-ref)/$test_set"
+    # Option 3: Under testset_nonref/ (e.g., Dataset/testset_nonref/test-EUVP-unpaired/)
+    elif [ -d "$DATA_BASE/testset_nonref/$test_set" ]; then
+        data_path="$DATA_BASE/testset_nonref/$test_set"
+    fi
+    
+    if [ -z "$data_path" ]; then
+        echo "⚠️  Skipping $test_set: not found in:"
+        echo "     - $DATA_BASE/$test_set"
+        echo "     - $DATA_BASE/testset(non-ref)/$test_set"
+        echo "     - $DATA_BASE/testset_nonref/$test_set"
         continue
     fi
     
     TOTAL=$((TOTAL + 1))
+    output_path="$OUTPUT_BASE/$test_set"
     
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📦 Exporting: $test_set"
+    echo "   From: $data_path"
+    echo "   To: $output_path"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     python teacher/export_pseudolabels_siglip2.py \
