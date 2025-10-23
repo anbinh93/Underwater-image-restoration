@@ -499,6 +499,20 @@ def main() -> None:
             if torch.isnan(masks).any() or torch.isnan(z_d).any():
                 print(f"[Rank {get_rank()}] WARNING: NaN detected in pseudo-labels!")
                 continue
+            
+            # Check for all-zero masks
+            if (masks == 0).all():
+                if is_main_process():
+                    print(f"\n[Rank {get_rank()}] ❌ CRITICAL: All masks are zero!")
+                    print(f"  Pseudo-label paths: {rel_paths}")
+                    print(f"  This will cause NaN in model. Check pseudo-label export.")
+                    print(f"  Stopping training.\n")
+                raise RuntimeError("All masks are zero - pseudo-labels are invalid!")
+            
+            # Check if masks are too small (close to zero)
+            if masks.abs().max() < 1e-6:
+                print(f"[Rank {get_rank()}] WARNING: Masks are nearly zero (max={masks.abs().max().item():.2e}). Skipping batch.")
+                continue
 
             # Debug: print input stats on first batch
             if is_main_process() and not hasattr(main, '_debug_printed'):
@@ -507,6 +521,7 @@ def main() -> None:
                 print(f"  GT: min={gt.min().item():.4f}, max={gt.max().item():.4f}, mean={gt.mean().item():.4f}")
                 print(f"  z_d: min={z_d.min().item():.4f}, max={z_d.max().item():.4f}, mean={z_d.mean().item():.4f}")
                 print(f"  masks: min={masks.min().item():.4f}, max={masks.max().item():.4f}, mean={masks.mean().item():.4f}")
+                print(f"  masks shape: {masks.shape}, non-zero: {(masks != 0).sum().item()}/{masks.numel()}")
                 main._debug_printed = True
 
             output, alpha_maps, student_logits = model(lq, z_d, masks=masks)
@@ -537,9 +552,23 @@ def main() -> None:
                 raise RuntimeError("Model is producing NaN outputs - training cannot continue")
 
             total_loss = lq.new_tensor(0.0)
-            total_loss = total_loss + l1_weight * charbonnier_loss(output, gt)
-            total_loss = total_loss + ssim_weight * ssim_loss(output, gt)
-            total_loss = total_loss + perceptual_loss(output, gt)
+            
+            # Track individual losses for debugging
+            l1_loss_val = charbonnier_loss(output, gt)
+            ssim_loss_val = ssim_loss(output, gt)
+            perc_loss_val = perceptual_loss(output, gt)
+            
+            total_loss = total_loss + l1_weight * l1_loss_val
+            total_loss = total_loss + ssim_weight * ssim_loss_val
+            total_loss = total_loss + perc_loss_val
+            
+            # Log individual losses on first batch
+            if is_main_process() and not hasattr(main, '_loss_logged'):
+                print(f"\n[DEBUG] Individual losses (first batch):")
+                print(f"  L1 (Charbonnier): {l1_loss_val.item():.4f} (weight: {l1_weight})")
+                print(f"  SSIM: {ssim_loss_val.item():.4f} (weight: {ssim_weight})")
+                print(f"  Perceptual: {perc_loss_val.item():.4f}")
+                main._loss_logged = True
 
             # Resize masks to match output/gt dimensions if needed
             if masks.shape[-2:] != output.shape[-2:]:
@@ -558,10 +587,19 @@ def main() -> None:
             region_term = region_loss(output, gt, masks=mask_list)
             total_loss = total_loss + region_weight * region_term
 
-            total_loss = total_loss + tv_loss(output)
+            tv_loss_val = tv_loss(output)
+            total_loss = total_loss + tv_loss_val
 
             distill = kd_loss(student_logits, teacher_prob, confidence_scale=confidence_scale)
             total_loss = total_loss + kd_weight * distill
+            
+            # Log more losses
+            if is_main_process() and not hasattr(main, '_loss_logged2'):
+                print(f"  Frequency HF: {hf_term.item():.4f}, LF: {lf_term.item():.4f}")
+                print(f"  Region: {region_term.item():.4f} (weight: {region_weight})")
+                print(f"  TV: {tv_loss_val.item():.4f}")
+                print(f"  KD Distill: {distill.item():.4f} (weight: {kd_weight})")
+                main._loss_logged2 = True
 
             if alpha_maps:
                 student_feat = alpha_maps[-1]
