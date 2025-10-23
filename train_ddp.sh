@@ -46,10 +46,6 @@ fi
 # Count pseudo-label files
 npy_count=$(find "${PSEUDO_ROOT}/train" -name "*_masks.npy" -type f 2>/dev/null | wc -l)
 
-if [[ $total_count -eq 0 ]]; then
-# Count pseudo-label files
-npy_count=$(find "${PSEUDO_ROOT}/train" -name "*_masks.npy" -type f 2>/dev/null | wc -l)
-
 if [[ $npy_count -eq 0 ]]; then
   echo "❌ ERROR: No mask files found in ${PSEUDO_ROOT}/train" >&2
   echo "   Expected: *_masks.npy, *_features.npy, *_probs.npy" >&2
