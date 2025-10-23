@@ -1,69 +1,71 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Distributed training wrapper script for 4 GPUs
+# Distributed training wrapper script for multi-GPU training
 # Usage: bash train_ddp.sh [num_gpus] [batch_size_per_gpu] [epochs] [img_size] [attn_chunk_size]
 
-NUM_GPUS="${1:-4}"
+NUM_GPUS="${1:-8}"
 BATCH_SIZE="${2:-2}"
-EPOCHS="${3:-20}"
+EPOCHS="${3:-200}"
 IMG_SIZE="${4:-128}"
-ATTN_CHUNK="${5:-128}"  # Lower chunk size = less memory but slower
+ATTN_CHUNK="${5:-128}"
 
 TRAIN_ROOT="Dataset/train"
-VAL_REF_ROOT="Dataset/testset(ref)"
-VAL_NONREF_ROOT="Dataset/testset(non-ref)"
-PSEUDO_ROOT="pseudo-labels/daclip"
-SAVE_PATH="experiments/daclip_student_ddp.pt"
+VAL_REF_ROOT="Dataset/testset_ref"
+VAL_NONREF_ROOT="Dataset/testset_nonref"
+PSEUDO_ROOT="pseudo-labels/siglip2"
+SAVE_PATH="experiments/student_siglip2_ddp.pt"
 WORKERS=4
 
 echo "================================================================================"
-echo "🚀 Starting Distributed Training with DDP"
+echo "🚀 DDP Training - Underwater Image Restoration"
 echo "================================================================================"
-echo "  Number of GPUs: ${NUM_GPUS}"
-echo "  Batch size per GPU: ${BATCH_SIZE}"
-echo "  Total batch size: $((NUM_GPUS * BATCH_SIZE))"
+echo "  GPUs: ${NUM_GPUS}"
+echo "  Batch/GPU: ${BATCH_SIZE} → Total: $((NUM_GPUS * BATCH_SIZE))"
 echo "  Epochs: ${EPOCHS}"
-echo "  Image size: ${IMG_SIZE}x${IMG_SIZE}"
-echo "  Attention chunk size: ${ATTN_CHUNK} (lower=less memory)"
-echo "  Workers per GPU: ${WORKERS}"
+echo "  Image size: ${IMG_SIZE}×${IMG_SIZE}"
+echo "  Attention chunk: ${ATTN_CHUNK}"
+echo "  Workers/GPU: ${WORKERS}"
+echo "  Pseudo-labels: ${PSEUDO_ROOT}"
 echo "================================================================================"
 echo ""
 
-# Verify CUDA is available
-python3 -c "import torch; assert torch.cuda.is_available(), 'CUDA not available'; print(f'✅ CUDA available: {torch.cuda.device_count()} GPUs')"
+# Verify CUDA
+python3 -c "import torch; assert torch.cuda.is_available(), 'CUDA not available'; print(f'✅ CUDA: {torch.cuda.device_count()} GPUs')"
 
-# Verify pseudo-labels exist
+# Verify pseudo-labels exist (with better error message)
 if [[ ! -d "${PSEUDO_ROOT}/train" ]]; then
-  echo "❌ ERROR: Pseudo-label directory not found: ${PSEUDO_ROOT}/train" >&2
-  echo "   Please run export stage first (bash run_clip_training.sh)" >&2
+  echo "❌ ERROR: Pseudo-labels not found at: ${PSEUDO_ROOT}/train" >&2
+  echo "" >&2
+  echo "   Please export pseudo-labels first:" >&2
+  echo "   bash export_all_siglip2.sh Dataset ${PSEUDO_ROOT}" >&2
+  echo "" >&2
   exit 1
 fi
 
-pt_count=$(find "${PSEUDO_ROOT}/train" -name "*.pt" -type f 2>/dev/null | wc -l)
-npy_count=$(find "${PSEUDO_ROOT}/train" -name "*_features.npy" -type f 2>/dev/null | wc -l)
-total_count=$((pt_count + npy_count))
+# Count pseudo-label files
+npy_count=$(find "${PSEUDO_ROOT}/train" -name "*_masks.npy" -type f 2>/dev/null | wc -l)
 
 if [[ $total_count -eq 0 ]]; then
-  echo "❌ ERROR: No pseudo-label files found in ${PSEUDO_ROOT}/train" >&2
+# Count pseudo-label files
+npy_count=$(find "${PSEUDO_ROOT}/train" -name "*_masks.npy" -type f 2>/dev/null | wc -l)
+
+if [[ $npy_count -eq 0 ]]; then
+  echo "❌ ERROR: No mask files found in ${PSEUDO_ROOT}/train" >&2
+  echo "   Expected: *_masks.npy, *_features.npy, *_probs.npy" >&2
   exit 1
 fi
 
-if [[ $pt_count -gt 0 ]]; then
-  echo "✅ Found ${pt_count} pseudo-label files (.pt format)"
-fi
-if [[ $npy_count -gt 0 ]]; then
-  echo "✅ Found ${npy_count} pseudo-label files (.npy format)"
-fi
+echo "✅ Found ${npy_count} training samples"
 echo ""
 
-# Create output directory
+# Create experiment directory
 mkdir -p experiments
 
-# Launch distributed training using torchrun (PyTorch >= 1.10)
-echo "Starting training with torchrun..."
+echo "Starting training..."
 echo ""
 
+# Launch distributed training
 torchrun \
   --standalone \
   --nnodes=1 \
@@ -81,8 +83,23 @@ torchrun \
   --save-path "${SAVE_PATH}" \
   --ddp
 
+EXIT_CODE=$?
+
 echo ""
-echo "================================================================================"
-echo "✅ Training completed!"
-echo "   Model saved to: ${SAVE_PATH}"
+if [[ $EXIT_CODE -eq 0 ]]; then
+  echo "================================================================================"
+  echo "✅ Training Completed Successfully!"
+  echo "================================================================================"
+  echo "  Model: ${SAVE_PATH}"
+  echo "  Epochs: ${EPOCHS}"
+  echo "  GPUs: ${NUM_GPUS}"
+  echo ""
+else
+  echo "================================================================================"
+  echo "❌ Training Failed (exit code: ${EXIT_CODE})"
+  echo "================================================================================"
+  echo "  Check logs above for errors"
+  echo ""
+  exit ${EXIT_CODE}
+fi
 echo "================================================================================"

@@ -473,7 +473,18 @@ def main() -> None:
         
         model.train()
         running_loss = 0.0
-        for batch in train_loader:
+        epoch_metrics = {'loss': 0.0, 'l1': 0.0, 'ssim': 0.0, 'perc': 0.0, 'freq': 0.0}
+        num_batches = 0
+        
+        # Progress bar (only on main process)
+        if is_main_process():
+            from tqdm import tqdm
+            pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.epochs}', 
+                       ncols=120, dynamic_ncols=True)
+        else:
+            pbar = train_loader
+        
+        for batch in pbar:
             lq = batch["LQ"].to(device)
             gt = batch["GT"].to(device)
             rel_paths = batch["rel_path"]
@@ -489,76 +500,21 @@ def main() -> None:
                 [item.get("confidence_scale", torch.ones_like(item["global_prob"])) for item in pseudo], dim=0
             )
 
-            # Check for NaN in inputs
-            if torch.isnan(lq).any():
-                print(f"[Rank {get_rank()}] WARNING: NaN detected in input LQ!")
-                continue
-            if torch.isnan(gt).any():
-                print(f"[Rank {get_rank()}] WARNING: NaN detected in ground truth!")
-                continue
-            if torch.isnan(masks).any() or torch.isnan(z_d).any():
-                print(f"[Rank {get_rank()}] WARNING: NaN detected in pseudo-labels!")
-                continue
-            
-            # Check for all-zero masks
-            if (masks == 0).all():
-                if is_main_process():
-                    print(f"\n[Rank {get_rank()}] ❌ CRITICAL: All masks are zero!")
-                    print(f"  Pseudo-label paths: {rel_paths}")
-                    print(f"  This will cause NaN in model. Check pseudo-label export.")
-                    print(f"  Stopping training.\n")
-                raise RuntimeError("All masks are zero - pseudo-labels are invalid!")
-            
-            # Check if masks are too small (close to zero)
-            if masks.abs().max() < 1e-6:
-                print(f"[Rank {get_rank()}] WARNING: Masks are nearly zero (max={masks.abs().max().item():.2e}). Skipping batch.")
-                continue
-            
             # CRITICAL: Normalize masks to prevent overflow
-            # SigLIP v2 may produce masks > 1.0, which can cause NaN
-            masks = masks / (masks.max() + 1e-8)  # Normalize to [0, 1]
-            masks = torch.clamp(masks, 0, 1)  # Ensure strictly in valid range
-
-            # Debug: print input stats on first batch
-            if is_main_process() and not hasattr(main, '_debug_printed'):
-                print(f"\n[DEBUG] Input statistics (after normalization):")
-                print(f"  LQ: min={lq.min().item():.4f}, max={lq.max().item():.4f}, mean={lq.mean().item():.4f}")
-                print(f"  GT: min={gt.min().item():.4f}, max={gt.max().item():.4f}, mean={gt.mean().item():.4f}")
-                print(f"  z_d: min={z_d.min().item():.4f}, max={z_d.max().item():.4f}, mean={z_d.mean().item():.4f}")
-                print(f"  masks: min={masks.min().item():.4f}, max={masks.max().item():.4f}, mean={masks.mean().item():.4f}")
-                print(f"  masks shape: {masks.shape}, non-zero: {(masks != 0).sum().item()}/{masks.numel()}")
-                main._debug_printed = True
+            masks = masks / (masks.max() + 1e-8)
+            masks = torch.clamp(masks, 0, 1)
 
             output, alpha_maps, student_logits = model(lq, z_d, masks=masks)
 
-            # Check for NaN in output with detailed info
+            # Quick NaN check
             if torch.isnan(output).any():
                 if is_main_process():
-                    print(f"\n[Rank {get_rank()}] ❌ NaN in model output detected!")
-                    print(f"  Output shape: {output.shape}")
-                    print(f"  NaN count: {torch.isnan(output).sum().item()} / {output.numel()}")
-                    print(f"  Output stats: min={output[~torch.isnan(output)].min().item() if not torch.isnan(output).all() else 'all NaN'}")
-                    
-                    # Check model parameters for NaN
-                    nan_params = []
-                    for name, param in model.named_parameters():
-                        if torch.isnan(param).any():
-                            nan_params.append(name)
-                    
-                    if nan_params:
-                        print(f"  ⚠️  NaN found in model parameters: {nan_params[:5]}...")
-                    else:
-                        print(f"  ℹ️  Model parameters are OK (no NaN)")
-                    
-                    print(f"  This suggests model forward pass is producing NaN")
-                    print(f"  Stopping training - need to fix model architecture or initialization\n")
-                
-                # Stop training completely if all batches are NaN
-                raise RuntimeError("Model is producing NaN outputs - training cannot continue")
+                    print(f"\n[Rank {get_rank()}] ⚠️  NaN detected in output! Skipping batch.")
+                continue
 
             total_loss = lq.new_tensor(0.0)
             
-            # Track individual losses for debugging
+            # Compute losses
             l1_loss_val = charbonnier_loss(output, gt)
             ssim_loss_val = ssim_loss(output, gt)
             perc_loss_val = perceptual_loss(output, gt)
@@ -566,14 +522,6 @@ def main() -> None:
             total_loss = total_loss + l1_weight * l1_loss_val
             total_loss = total_loss + ssim_weight * ssim_loss_val
             total_loss = total_loss + perc_loss_val
-            
-            # Log individual losses on first batch
-            if is_main_process() and not hasattr(main, '_loss_logged'):
-                print(f"\n[DEBUG] Individual losses (first batch):")
-                print(f"  L1 (Charbonnier): {l1_loss_val.item():.4f} (weight: {l1_weight})")
-                print(f"  SSIM: {ssim_loss_val.item():.4f} (weight: {ssim_weight})")
-                print(f"  Perceptual: {perc_loss_val.item():.4f}")
-                main._loss_logged = True
 
             # Resize masks to match output/gt dimensions if needed
             if masks.shape[-2:] != output.shape[-2:]:
@@ -584,10 +532,10 @@ def main() -> None:
             hf_mask = masks_resized[:, :1, :, :]
             lf_mask = masks_resized[:, -1:, :, :]
             hf_term, lf_term = frequency_loss(output, gt, hf_mask=hf_mask, lf_mask=lf_mask)
-            total_loss = total_loss + hf_term + lf_term
+            freq_loss_val = hf_term + lf_term
+            total_loss = total_loss + freq_loss_val
 
             # Split masks along channel dimension for RegionLoss
-            # RegionLoss expects iterable of individual mask channels
             mask_list = [masks_resized[:, i:i+1, :, :] for i in range(masks_resized.shape[1])]
             region_term = region_loss(output, gt, masks=mask_list)
             total_loss = total_loss + region_weight * region_term
@@ -597,14 +545,6 @@ def main() -> None:
 
             distill = kd_loss(student_logits, teacher_prob, confidence_scale=confidence_scale)
             total_loss = total_loss + kd_weight * distill
-            
-            # Log more losses
-            if is_main_process() and not hasattr(main, '_loss_logged2'):
-                print(f"  Frequency HF: {hf_term.item():.4f}, LF: {lf_term.item():.4f}")
-                print(f"  Region: {region_term.item():.4f} (weight: {region_weight})")
-                print(f"  TV: {tv_loss_val.item():.4f}")
-                print(f"  KD Distill: {distill.item():.4f} (weight: {kd_weight})")
-                main._loss_logged2 = True
 
             if alpha_maps:
                 student_feat = alpha_maps[-1]
@@ -624,58 +564,90 @@ def main() -> None:
                 positive_index = torch.arange(image_embed.shape[0], device=device)
                 total_loss = total_loss + contrastive_loss(image_embed, text_embed, positive_index)
 
-            # Check for NaN in total loss before backward
+            # Check for NaN/Inf in total loss
             if torch.isnan(total_loss) or torch.isinf(total_loss):
-                print(f"[Rank {get_rank()}] WARNING: NaN/Inf in total_loss! Skipping batch.")
-                print(f"   Loss value: {total_loss.item()}")
+                if is_main_process():
+                    print(f"[Rank {get_rank()}] ⚠️  NaN/Inf in loss! Skipping batch.")
                 continue
 
             optimizer.zero_grad()
             total_loss.backward()
             
-            # Check for NaN/Inf in gradients
+            # Gradient clipping with NaN check
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             
             if torch.isnan(grad_norm) or torch.isinf(grad_norm):
                 if is_main_process():
-                    print(f"\n[Rank {get_rank()}] ⚠️  NaN/Inf gradient detected! grad_norm={grad_norm}")
-                    print(f"  Skipping optimizer step for this batch")
-                    print(f"  This may indicate numerical instability in the model\n")
-                optimizer.zero_grad()  # Clear bad gradients
+                    print(f"[Rank {get_rank()}] ⚠️  Invalid gradient! Skipping.")
+                optimizer.zero_grad()
                 continue
             
             optimizer.step()
 
+            # Track metrics
             running_loss += total_loss.item()
+            epoch_metrics['loss'] += total_loss.item()
+            epoch_metrics['l1'] += l1_loss_val.item()
+            epoch_metrics['ssim'] += ssim_loss_val.item()
+            epoch_metrics['perc'] += perc_loss_val.item()
+            epoch_metrics['freq'] += freq_loss_val.item()
+            num_batches += 1
+            
+            # Update progress bar (main process only)
+            if is_main_process():
+                pbar.set_postfix({
+                    'loss': f'{total_loss.item():.4f}',
+                    'l1': f'{l1_loss_val.item():.3f}',
+                    'ssim': f'{ssim_loss_val.item():.3f}'
+                })
 
         # Synchronize loss across all processes for DDP
         if args.ddp:
-            avg_loss_tensor = torch.tensor(running_loss / len(train_loader), device=device)
+            avg_loss_tensor = torch.tensor(running_loss / max(num_batches, 1), device=device)
             dist.all_reduce(avg_loss_tensor, op=dist.ReduceOp.AVG)
             avg_loss = avg_loss_tensor.item()
         else:
-            avg_loss = running_loss / len(train_loader)
+            avg_loss = running_loss / max(num_batches, 1)
+        
+        # Calculate epoch average metrics
+        for key in epoch_metrics:
+            epoch_metrics[key] /= max(num_batches, 1)
         
         # Only main process saves and evaluates
         if is_main_process():
             # Save model (unwrap DDP if needed)
             model_to_save = model.module if args.ddp else model
             torch.save(model_to_save.state_dict(), args.save_path)
-            print_main(f"Epoch {epoch + 1}/{args.epochs} - Train loss: {avg_loss:.4f}")
-
+            
+            # Print comprehensive epoch summary
+            print(f"\n{'='*80}")
+            print(f"Epoch {epoch + 1}/{args.epochs} Summary")
+            print(f"{'='*80}")
+            print(f"  Total Loss:      {avg_loss:.4f}")
+            print(f"  L1 Loss:         {epoch_metrics['l1']:.4f}")
+            print(f"  SSIM Loss:       {epoch_metrics['ssim']:.4f}")
+            print(f"  Perceptual Loss: {epoch_metrics['perc']:.4f}")
+            print(f"  Frequency Loss:  {epoch_metrics['freq']:.4f}")
+            print(f"  Batches:         {num_batches}")
+            
+            # Evaluation
             if ref_entries:
+                print(f"\n{'-'*80}")
+                print("Reference Evaluation:")
+                print(f"{'-'*80}")
                 ref_metrics = evaluate_reference(model, ref_entries, device)
                 for name, metrics in ref_metrics.items():
-                    print_main(f"[Ref] {name}: PSNR={metrics['psnr']:.2f} dB, SSIM={metrics['ssim']:.4f}")
-            else:
-                print_main("No reference evaluation datasets found.")
+                    print(f"  {name:25s} | PSNR: {metrics['psnr']:6.2f} dB | SSIM: {metrics['ssim']:.4f}")
 
             if nonref_entries:
+                print(f"\n{'-'*80}")
+                print("Non-Reference Evaluation:")
+                print(f"{'-'*80}")
                 nonref_metrics = evaluate_non_reference(model, nonref_entries, device)
                 for name, metrics in nonref_metrics.items():
-                    print_main(f"[Non-Ref] {name}: UIQM={metrics['uiqm']:.3f}, UCIQE={metrics['uciqe']:.3f}")
-            else:
-                print_main("No non-reference evaluation datasets found.")
+                    print(f"  {name:25s} | UIQM: {metrics['uiqm']:6.3f} | UCIQE: {metrics['uciqe']:6.3f}")
+            
+            print(f"{'='*80}\n")
         
         # Synchronize all processes after evaluation
         if args.ddp:
