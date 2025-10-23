@@ -16,7 +16,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-from tqdm import tqdm
 
 from underwater_ir.data import (
     create_paired_eval_loader,
@@ -270,7 +269,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loss-config", type=str, default=None, help="Optional JSON overriding loss weights.")
     parser.add_argument("--save-path", type=str, default="student_model.pt")
     parser.add_argument("--num-degradations", type=int, default=None, help="Number of degradation categories for student head.")
-    parser.add_argument("--val-freq", type=int, default=5, help="Run validation every N epochs (0 to disable)")
     
     # DDP arguments
     parser.add_argument("--ddp", action="store_true", help="Enable Distributed Data Parallel training")
@@ -451,14 +449,7 @@ def main() -> None:
         
         model.train()
         running_loss = 0.0
-        
-        # Create progress bar (only on main process)
-        if is_main_process():
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{args.epochs}", ncols=100)
-        else:
-            pbar = train_loader
-        
-        for batch_idx, batch in enumerate(pbar):
+        for batch in train_loader:
             lq = batch["LQ"].to(device)
             gt = batch["GT"].to(device)
             rel_paths = batch["rel_path"]
@@ -506,6 +497,13 @@ def main() -> None:
             if alpha_maps:
                 student_feat = alpha_maps[-1]
                 teacher_feat = masks_resized.mean(dim=1, keepdim=True)
+                
+                # Resize student_feat to match teacher_feat if dimensions differ
+                if student_feat.shape[-2:] != teacher_feat.shape[-2:]:
+                    student_feat = F.interpolate(
+                        student_feat, size=teacher_feat.shape[-2:], mode='bilinear', align_corners=False
+                    )
+                
                 total_loss = total_loss + feat_align_loss(student_feat, teacher_feat)
 
             if all("text_embeddings" in item for item in pseudo):
@@ -520,10 +518,6 @@ def main() -> None:
             optimizer.step()
 
             running_loss += total_loss.item()
-            
-            # Update progress bar with current loss
-            if is_main_process():
-                pbar.set_postfix({'loss': f'{total_loss.item():.4f}'})
 
         # Synchronize loss across all processes for DDP
         if args.ddp:
@@ -533,39 +527,26 @@ def main() -> None:
         else:
             avg_loss = running_loss / len(train_loader)
         
-        print_main(f"\n{'='*80}")
-        print_main(f"Epoch {epoch + 1}/{args.epochs} - Average Train Loss: {avg_loss:.4f}")
-        print_main(f"{'='*80}\n")
-        
         # Only main process saves and evaluates
         if is_main_process():
-            # Always save checkpoint
+            # Save model (unwrap DDP if needed)
             model_to_save = model.module if args.ddp else model
             torch.save(model_to_save.state_dict(), args.save_path)
-            print_main(f"💾 Model checkpoint saved to {args.save_path}")
-            
-            # Run validation every val_freq epochs or on last epoch
-            should_validate = (args.val_freq > 0 and (epoch + 1) % args.val_freq == 0) or (epoch + 1 == args.epochs)
-            
-            if should_validate:
-                print_main(f"\n{'🔍 Running Validation':^80}")
-                print_main(f"{'-'*80}")
-                
-                if ref_entries:
-                    ref_metrics = evaluate_reference(model, ref_entries, device)
-                    print_main("\n📊 Reference Metrics:")
-                    for name, metrics in ref_metrics.items():
-                        print_main(f"  • {name:20s}: PSNR={metrics['psnr']:6.2f} dB, SSIM={metrics['ssim']:.4f}")
-                
-                if nonref_entries:
-                    nonref_metrics = evaluate_non_reference(model, nonref_entries, device)
-                    print_main("\n📊 Non-Reference Metrics:")
-                    for name, metrics in nonref_metrics.items():
-                        print_main(f"  • {name:20s}: UIQM={metrics['uiqm']:6.3f}, UCIQE={metrics['uciqe']:6.3f}")
-                
-                print_main(f"{'-'*80}\n")
+            print_main(f"Epoch {epoch + 1}/{args.epochs} - Train loss: {avg_loss:.4f}")
+
+            if ref_entries:
+                ref_metrics = evaluate_reference(model, ref_entries, device)
+                for name, metrics in ref_metrics.items():
+                    print_main(f"[Ref] {name}: PSNR={metrics['psnr']:.2f} dB, SSIM={metrics['ssim']:.4f}")
             else:
-                print_main(f"⏭️  Validation skipped (runs every {args.val_freq} epochs)\n")
+                print_main("No reference evaluation datasets found.")
+
+            if nonref_entries:
+                nonref_metrics = evaluate_non_reference(model, nonref_entries, device)
+                for name, metrics in nonref_metrics.items():
+                    print_main(f"[Non-Ref] {name}: UIQM={metrics['uiqm']:.3f}, UCIQE={metrics['uciqe']:.3f}")
+            else:
+                print_main("No non-reference evaluation datasets found.")
         
         # Synchronize all processes after evaluation
         if args.ddp:
