@@ -157,4 +157,6 @@ class NAFNetWFIGate(nn.Module):
 
         x = self.final_norm(x)
         out = self.head(x)
-        return out + residual, alpha_maps, deg_logits
+        # Clamp output to [0, 1] for image restoration (residual learning can overflow)
+        final_output = torch.clamp(out + residual, 0, 1)
+        return final_output, alpha_maps, deg_logits

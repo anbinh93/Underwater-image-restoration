@@ -526,6 +526,7 @@ def main() -> None:
             masks = masks / (masks.max() + 1e-8)
             masks = torch.clamp(masks, 0, 1)
 
+            # Model output is already clamped to [0, 1] (residual learning with clamp)
             output, alpha_maps, student_logits = model(lq, z_d, masks=masks)
 
             # Quick NaN check
