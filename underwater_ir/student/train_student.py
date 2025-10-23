@@ -58,6 +58,11 @@ def get_world_size() -> int:
     return dist.get_world_size() if dist.is_initialized() else 1
 
 
+def ensure_device_consistency(data: Dict[str, torch.Tensor], device: torch.device) -> Dict[str, torch.Tensor]:
+    """Ensure all tensors in dict are on the same device"""
+    return {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in data.items()}
+
+
 def charbonnier_loss(pred: torch.Tensor, target: torch.Tensor, epsilon: float = 1e-3) -> torch.Tensor:
     return torch.sqrt((pred - target) ** 2 + epsilon**2).mean()
 
@@ -118,7 +123,7 @@ def load_pseudo_label(root: Path, rel_path: str) -> Dict[str, torch.Tensor]:
             "masks": masks,
             "global_prob": probs,
             "confidence": torch.ones_like(probs) * 0.8,  # Default confidence
-            "confidence_scale": torch.tensor(0.2),  # Default scale
+            "confidence_scale": torch.tensor(0.2, dtype=probs.dtype),  # Same dtype as probs
         }
         return data
     
@@ -191,8 +196,10 @@ def evaluate_reference(
                 gt = batch["GT"].to(device)
                 rel_paths = batch["rel_path"]
                 pseudo = [load_pseudo_label(entry.pseudo_root, rel) for rel in rel_paths]
-                masks = torch.stack([item["masks"] for item in pseudo], dim=0).to(device)
-                z_d = torch.stack([item["z_d"] for item in pseudo], dim=0).to(device)
+                # Ensure device consistency
+                pseudo = [ensure_device_consistency(p, device) for p in pseudo]
+                masks = torch.stack([item["masks"] for item in pseudo], dim=0)
+                z_d = torch.stack([item["z_d"] for item in pseudo], dim=0)
                 output, _, _ = model(lq, z_d, masks=masks)
                 for pred_img, gt_img in zip(output, gt):
                     psnr_sum += psnr_value(pred_img.clamp(0, 1), gt_img.clamp(0, 1))
@@ -222,8 +229,10 @@ def evaluate_non_reference(
                 lq = batch["LQ"].to(device)
                 rel_paths = batch["rel_path"]
                 pseudo = [load_pseudo_label(entry.pseudo_root, rel) for rel in rel_paths]
-                masks = torch.stack([item["masks"] for item in pseudo], dim=0).to(device)
-                z_d = torch.stack([item["z_d"] for item in pseudo], dim=0).to(device)
+                # Ensure device consistency
+                pseudo = [ensure_device_consistency(p, device) for p in pseudo]
+                masks = torch.stack([item["masks"] for item in pseudo], dim=0)
+                z_d = torch.stack([item["z_d"] for item in pseudo], dim=0)
                 output, _, _ = model(lq, z_d, masks=masks)
                 for pred_img in output:
                     pred_img = pred_img.clamp(0, 1).cpu()
@@ -444,12 +453,15 @@ def main() -> None:
             rel_paths = batch["rel_path"]
 
             pseudo = [load_pseudo_label(pseudo_train_root, rel) for rel in rel_paths]
-            masks = torch.stack([item["masks"] for item in pseudo], dim=0).to(device)
-            z_d = torch.stack([item["z_d"] for item in pseudo], dim=0).to(device)
-            teacher_prob = torch.stack([item["global_prob"] for item in pseudo], dim=0).to(device)
+            # Ensure all pseudo-label tensors are on correct device
+            pseudo = [ensure_device_consistency(p, device) for p in pseudo]
+            
+            masks = torch.stack([item["masks"] for item in pseudo], dim=0)
+            z_d = torch.stack([item["z_d"] for item in pseudo], dim=0)
+            teacher_prob = torch.stack([item["global_prob"] for item in pseudo], dim=0)
             confidence_scale = torch.stack(
                 [item.get("confidence_scale", torch.ones_like(item["global_prob"])) for item in pseudo], dim=0
-            ).to(device)
+            )
 
             output, alpha_maps, student_logits = model(lq, z_d, masks=masks)
 
